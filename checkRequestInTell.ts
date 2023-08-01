@@ -5,22 +5,14 @@ import {
   TellContext,
   ValueContext,
 } from './ASGrammarParser';
-import {
-  Callback,
-  checkRequestInIfStatement,
-  ErrorCallback,
-  FunctionCallCallback,
-} from './checkRequestInIfStatement';
+import checkRequestInIfStatement from './checkRequestInIfStatement';
+import { Callback, checkFunctionCall } from './checkRequestListener';
 
 export class checkRequestInTell extends checkRequestInIfStatement {
   constructor() {
     super();
   }
-  checkTell(
-    ctx: TellContext,
-    functionCallCallback: FunctionCallCallback,
-    errorCallback: ErrorCallback
-  ) {
+  checkTell(ctx: TellContext) {
     let requests = 0;
     // Is this for an app?
     const tellAppCtx = ctx.tellApp();
@@ -49,9 +41,7 @@ export class checkRequestInTell extends checkRequestInIfStatement {
             statementListCtx,
             (statementCtx: StatementContext) => {
               return statementCtx.keystroke();
-            },
-            functionCallCallback,
-            errorCallback
+            }
           );
         }
       }
@@ -70,9 +60,7 @@ export class checkRequestInTell extends checkRequestInIfStatement {
             statementListCtx,
             (statementCtx: StatementContext) => {
               return this.checkUrl(statementCtx);
-            },
-            functionCallCallback,
-            errorCallback
+            }
           );
         }
         // to my knowledge there isn't such a thing as a tellApp inside a tellId.
@@ -89,12 +77,7 @@ export class checkRequestInTell extends checkRequestInIfStatement {
     }
   }
 
-  checkRequests(
-    ctx: StatementListContext,
-    requestObjectCallback: Callback,
-    functionCallCallback: FunctionCallCallback,
-    errorCallback: ErrorCallback
-  ) {
+  checkRequests(ctx: StatementListContext, requestObjectCallback: Callback) {
     // Handle cases where this.reqests would normally be incremented.
     let requests = 0;
     ctx.statement().forEach((statementCtx) => {
@@ -110,30 +93,27 @@ export class checkRequestInTell extends checkRequestInIfStatement {
 
       // Loops
       // Will throw an error if it finds any requests.
-      this.checkLoop(
-        statementCtx,
-        requestObjectCallback,
-        functionCallCallback,
-        errorCallback
-      );
+      this.checkLoop(statementCtx, requestObjectCallback);
 
       // Function calls
       const functionCallCtx = statementCtx.functionCall();
       if (functionCallCtx) {
-        functionCallCallback(functionCallCtx, (func) => {
-          requests += func.requests + func.keystrokes;
-        });
+        checkFunctionCall(
+          functionCallCtx,
+          (func) => {
+            requests += func.requests + func.keystrokes;
+          },
+          this.functions,
+          this.knownFunctions
+        );
       }
 
       // if blocks
       const ifBlockCtx = statementCtx.ifBlock();
       if (ifBlockCtx) {
-        this.checkIfBlock(
-          ifBlockCtx,
-          this.checkTell,
-          functionCallCallback,
-          errorCallback
-        ).forEach((request) => (requests += request));
+        this.checkIfBlock(ifBlockCtx, this.checkTell).forEach(
+          (request) => (requests += request)
+        );
       }
     });
     return requests;
@@ -221,42 +201,22 @@ export class checkRequestInTell extends checkRequestInIfStatement {
       }
     }
   }
-  checkLoop(
-    ctx: StatementContext,
-    callback: Callback,
-    functionCallCallback: FunctionCallCallback,
-    errorCallback: ErrorCallback
-  ) {
+  checkLoop(ctx: StatementContext, callback: Callback) {
     // Loops don't return requests. They throw errors if they detect anything.
     const loopStatementCtx = ctx.loopStatement();
     if (loopStatementCtx) {
       const repeatLoopCtx = loopStatementCtx.repeatLoop();
       if (repeatLoopCtx) {
-        this.checkLoopStatements(
-          repeatLoopCtx.statementList(),
-          callback,
-          functionCallCallback,
-          errorCallback
-        );
+        this.checkLoopStatements(repeatLoopCtx.statementList(), callback);
       }
       const whileLoopCtx = loopStatementCtx.whileLoop();
       if (whileLoopCtx) {
-        this.checkLoopStatements(
-          whileLoopCtx.statementList(),
-          callback,
-          functionCallCallback,
-          errorCallback
-        );
+        this.checkLoopStatements(whileLoopCtx.statementList(), callback);
       }
     }
   }
 
-  checkLoopStatements(
-    ctx: StatementListContext,
-    callback: Callback,
-    functionCallCallback: FunctionCallCallback,
-    errorCallback: ErrorCallback
-  ) {
+  checkLoopStatements(ctx: StatementListContext, callback: Callback) {
     ctx.statement().forEach((statementCtx: StatementContext) => {
       const error = () => {
         throw new Error('Request detected in loop.');
@@ -267,32 +227,29 @@ export class checkRequestInTell extends checkRequestInIfStatement {
       }
 
       // Check for more loops
-      this.checkLoop(
-        statementCtx,
-        callback,
-        functionCallCallback,
-        errorCallback
-      );
+      this.checkLoop(statementCtx, callback);
 
       // Check for a function
       // Passing an error object directly to checkFunctionCall may have unintended side effects (false negatives). Instead check if return is truthy.
       const functionCallCtx = statementCtx.functionCall();
       if (functionCallCtx) {
         // If it exists, it has a non-zero amount of requests
-        functionCallCallback(functionCallCtx, () => {
-          error();
-        });
+        checkFunctionCall(
+          functionCallCtx,
+          () => {
+            error();
+          },
+          this.functions,
+          this.knownFunctions
+        );
       }
       // Check for if statement
       const ifBlockCtx = statementCtx.ifBlock();
       if (ifBlockCtx) {
         if (
-          this.checkIfBlock(
-            ifBlockCtx,
-            this.checkTell,
-            functionCallCallback,
-            errorCallback
-          ).every((element) => element)
+          this.checkIfBlock(ifBlockCtx, this.checkTell).every(
+            (element) => element
+          )
         ) {
           error();
         }

@@ -11,42 +11,21 @@ import {
   IfStatementContext,
   ErrorHandlerContext,
 } from './ASGrammarParser';
+import {checkFunctionCall, FunctionProperties} from './checkRequestListener'
 
-interface functionProperties {
-  requests: number;
-  keystrokes: number;
-}
 
-type ContextCallback = (
-  ctx: StatementContext
-) => ParserRuleContext | TerminalNode | undefined;
-type ArrayCallback = (
-  ctx: StatementContext
-) => ParserRuleContext[] | TerminalNode[] | undefined;
-type VoidCallback = (ctx: StatementContext) => void;
 type TellCallback = (
   ctx: TellContext,
-  functionCallCallback: FunctionCallCallback,
-  errorCallback: ErrorCallback
 ) => number;
-export type ErrorCallback = (
-  parentCtx: ErrorHandlerContext,
-  ctx?: StatementListContext,
-  start?: number
-) => number[];
-type FunctionCallback = (functionProperties: functionProperties) => void;
-export type FunctionCallCallback = (
-  ctx: FunctionCallContext,
-  callback: FunctionCallback
-) => void;
-export type Callback = ContextCallback | ArrayCallback | VoidCallback;
 
-export class checkRequestInIfStatement{
-  functions: { [key: string]: functionProperties };
+
+
+export default class checkRequestInIfStatement{
+  functions: { [key: string]: FunctionProperties };
   knownFunctions: string[];
   constructor(
     knownFunctions: string[] = [],
-    functions: { [key: string]: functionProperties } = {}
+    functions: { [key: string]: FunctionProperties } = {}
   ) {
     this.knownFunctions = knownFunctions;
     this.functions = functions;
@@ -55,8 +34,6 @@ export class checkRequestInIfStatement{
   checkIfStatement(
     ctx: StatementListContext,
     tellCallback: TellCallback,
-    functionCallCallback: FunctionCallCallback,
-    errorCallback: ErrorCallback,
     start?: number
   ) {
     let requests = 0;
@@ -71,18 +48,16 @@ export class checkRequestInIfStatement{
       }
       const functionCallCtx = statementCtx.functionCall();
       if (functionCallCtx) {
-        functionCallCallback(functionCallCtx, (func) => {
+        checkFunctionCall(functionCallCtx, (func) => {
           requests += func.requests;
           keystrokes += func.keystrokes;
-        });
+        }, this.functions, this.knownFunctions);
       }
       const ifBlockCtx = statementCtx.ifBlock();
       if (ifBlockCtx) {
         const count = this.checkIfBlock(
           ifBlockCtx,
           tellCallback,
-          functionCallCallback,
-          errorCallback
         );
         requests += count[0];
         keystrokes += count[1];
@@ -90,11 +65,11 @@ export class checkRequestInIfStatement{
       // handle statements. Specifically errorHandlers, tells
       const tellCtx = statementCtx.tell();
       if (tellCtx) {
-        tellCallback(tellCtx, functionCallCallback, errorCallback);
+        tellCallback(tellCtx);
       }
       const errorHandlerCtx = statementCtx.errorHandler();
       if (errorHandlerCtx) {
-        errorCallback(errorHandlerCtx);
+        this.checkErrorHandler(errorHandlerCtx, tellCallback);
       }
       if (start && (requests || keystrokes)) {
         // Prevent two requests from the same if block from being counted twice
@@ -110,8 +85,6 @@ export class checkRequestInIfStatement{
   checkElseRequests(
     ctx: StatementListContext,
     tellCallback: TellCallback,
-    functionCallCallback: FunctionCallCallback,
-    errorCallback: ErrorCallback,
     props: number[],
     start?: number
   ) {
@@ -119,8 +92,6 @@ export class checkRequestInIfStatement{
     const elseProps = this.checkIfStatement(
       ctx,
       tellCallback,
-      functionCallCallback,
-      errorCallback,
       start
     );
     for (let i in elseProps) {
@@ -134,8 +105,6 @@ export class checkRequestInIfStatement{
   checkElse(
     ctx: ElseIfContext | ElseStatementContext,
     tellCallback: TellCallback,
-    functionCallCallback: FunctionCallCallback,
-    errorCallback: ErrorCallback,
     props: number[],
     start?: number
   ) {
@@ -144,8 +113,6 @@ export class checkRequestInIfStatement{
       props = this.checkElseRequests(
         elseStatementCtx.statementList(),
         tellCallback,
-        functionCallCallback,
-        errorCallback,
         props,
         start
       );
@@ -154,8 +121,6 @@ export class checkRequestInIfStatement{
       props = this.checkElseRequests(
         elseIfCtx.ifStatement().statementList(),
         tellCallback,
-        functionCallCallback,
-        errorCallback,
         props,
         start
       );
@@ -166,8 +131,6 @@ export class checkRequestInIfStatement{
   checkIfBlock(
     ifBlockCtx: IfBlockContext,
     tellCallback: TellCallback,
-    functionCallCallback: FunctionCallCallback,
-    errorCallback: ErrorCallback,
     start?: number,
     ctx?: IfStatementContext | ElseIfContext | ElseStatementContext
   ) {
@@ -181,8 +144,6 @@ export class checkRequestInIfStatement{
       count = this.checkIfStatement(
         ifBlockCtx.ifStatement().statementList(),
         tellCallback,
-        functionCallCallback,
-        errorCallback,
         start
       );
       // Only way this method can be triggered is if this is a request, keystroke or function call with a request or keystroke from inside an ifStatement. If both are 0, only reason is if this is a dup. No need to analyze further.
@@ -195,8 +156,6 @@ export class checkRequestInIfStatement{
           count = this.checkElse(
             elseIfCtx,
             tellCallback,
-            functionCallCallback,
-            errorCallback,
             count,
             start
           );
@@ -208,8 +167,6 @@ export class checkRequestInIfStatement{
         count = this.checkElse(
           elseStatementCtx,
           tellCallback,
-          functionCallCallback,
-          errorCallback,
           count,
           start
         );
@@ -221,8 +178,6 @@ export class checkRequestInIfStatement{
         this.checkIfStatement(
           ifBlockCtx.ifStatement().statementList(),
           tellCallback,
-          functionCallCallback,
-          errorCallback,
           start
         ).every((element) => !element)
       ) {
@@ -238,8 +193,6 @@ export class checkRequestInIfStatement{
               count = this.checkElse(
                 elseIfCtx,
                 tellCallback,
-                functionCallCallback,
-                errorCallback,
                 count
               );
               // If there are any requests/keystrokes, and not after context, it's calced. Can stop checking.
@@ -255,8 +208,6 @@ export class checkRequestInIfStatement{
           count = this.checkElse(
             elseStatementCtx,
             tellCallback,
-            functionCallCallback,
-            errorCallback,
             count
           );
         }
@@ -266,6 +217,43 @@ export class checkRequestInIfStatement{
     }
     if (!calced) {
       return count;
+    }
+    return [0, 0];
+  }
+  checkErrorHandler(
+    parentCtx: ErrorHandlerContext,
+    tellCallback: TellCallback,
+    ctx?: StatementListContext,
+    start?: number
+  ) {
+    // Can be handled like a conditional without the option for elseIf
+    // Also have to account for more than one request.
+    const tryStatementListCtx = parentCtx.statementList(0);
+    if (
+      (tryStatementListCtx.start.start === ctx?.start.start &&
+        tryStatementListCtx.stop?.stop === ctx?.stop?.stop) ||
+      !ctx
+    ) {
+      let [requests, keystrokes] = this.checkIfStatement(
+        tryStatementListCtx,
+        tellCallback,
+        start
+      );
+      const errorStatementListCtx = parentCtx.statementList(1);
+      if (errorStatementListCtx) {
+        const count = this.checkIfStatement(
+          tryStatementListCtx,
+          tellCallback,
+          start
+        );
+        if (count[0] > requests) {
+          requests = count[0];
+        }
+        if (count[1] > keystrokes) {
+          keystrokes = count[1];
+        }
+      }
+      return [requests, keystrokes];
     }
     return [0, 0];
   }
