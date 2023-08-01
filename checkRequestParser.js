@@ -23,7 +23,9 @@ class checkRequestParser extends ASGrammarParser {
     // creates a new proxy error listener with delegates [ ConsoleErrorListener.INSTANCE ], which is to say an array with one instance of the ConsoleErrorListener class.
     const listener = this.getErrorListenerDispatch();
     // Default behavior of super class is to iterate through the one item of the array and call the syntaxError method on it. Which does this: console.error("line " + line + ":" + column + " " + msg);
+    
     // listener.syntaxError(this, offendingToken, line, column, msg, err);
+
     // Instead, we're going to stop the whole program and throw an error!
     throw new Error('line ' + line + ':' + column + ' ' + msg);
   }
@@ -54,7 +56,6 @@ let tree;
 try {
   tree = parser.program();
 } catch (error) {
-  // fs.writeFileSync('./checkRequestLog.txt', 'Parsing error: ' + error.message);
   process.stdout.write('Parsing error: ' + error.message)
 }
 
@@ -64,21 +65,11 @@ if (tree) {
   // Walk the parse tree and trigger the listener events
   antlr4.tree.ParseTreeWalker.DEFAULT.walk(listener, tree);
   if (listener.requests > domains) {
-    // fs.writeFileSync(
-    //   './checkRequestLog.txt',
-    //   'Error: Number of detected requests exceeds number of specified domains. Number of requests: ' +
-    //     listener.requests.toString()
-    // );
     process.stdout.write('Error: Number of detected requests exceeds number of specified domains. Number of requests: ' +
         listener.requests.toString());
   } else if (listener.error) {
-    // fs.writeFileSync('./log.txt.', listener.error);
     process.stdout.write(listener.error)
   } else {
-    // fs.writeFileSync(
-    //   './checkRequestLog.txt',
-    //   'Look at you, not trying to break TOS!'
-    // );
     process.stdout.write('true')
   }
 }

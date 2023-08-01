@@ -2,6 +2,7 @@
 Object.defineProperty(exports, '__esModule', { value: true });
 const ASGrammarParser = require('./ASGrammarParser');
 const ASGrammarListener = require('./ASGrammarListener.js').default;
+
 class checkRequestListener extends ASGrammarListener {
     constructor(requests = 0, functions = {}, knownFunctions = [], error) {
         super()
