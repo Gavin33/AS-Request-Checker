@@ -54,6 +54,7 @@ export class checkRequestInTell extends checkRequestInIfStatement {
         const statementListCtx = tellArgCtx.statementList();
         if (statementListCtx) {
           // Might be worth it to bake checkStart into checkRequests.
+          // kinda? checkURL returns terminal nodes. Those don't have start values.
           const count = this.checkRequests(
             statementListCtx,
             (statementCtx: StatementContext) => {
@@ -81,6 +82,7 @@ export class checkRequestInTell extends checkRequestInIfStatement {
         // Specifically looking for setting the URL.
         this.checkToStatement(tellArgCtx, (statementCtx: StatementContext) => {
           // Check if URL
+          // Should we checkMakeNew as well?
           if (
             this.checkUrl(statementCtx) &&
             this.checkStart(statementCtx, true, [requests, 0], start, first)
