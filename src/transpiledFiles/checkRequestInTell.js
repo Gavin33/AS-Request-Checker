@@ -27,6 +27,7 @@ Object.defineProperty(exports, "__esModule", {
 exports.checkRequestInTell = void 0;
 var checkRequestInIfStatement_1 = __importDefault(require("./checkRequestInIfStatement"));
 var checkRequestListener_1 = require("./checkRequestListener");
+// Thought of the day. What if there's more than one request in a tell block? Would we get expected behavior, or did we just forget about that whole thing?
 var checkRequestInTell = /*#__PURE__*/function (_checkRequestInIfStat) {
   _inherits(checkRequestInTell, _checkRequestInIfStat);
   var _super = _createSuper(checkRequestInTell);
@@ -44,7 +45,7 @@ var checkRequestInTell = /*#__PURE__*/function (_checkRequestInIfStat) {
       if (tellAppCtx) {
         var tellArgCtx = tellAppCtx.tellArg();
         // Is it for process Google Chrome?
-        if (tellAppCtx.appType().text === 'process' && tellAppCtx.STRING().text === 'Google Chrome') {
+        if (tellAppCtx.appType().getText() === 'process' && tellAppCtx.STRING().getText() === 'Google Chrome') {
           // Is it just one statement (toStatement)?
           if (this.checkToStatement(tellArgCtx, function (statementCtx) {
             return statementCtx.keystroke();
@@ -59,7 +60,7 @@ var checkRequestInTell = /*#__PURE__*/function (_checkRequestInIfStat) {
             });
           }
         }
-        if (tellAppCtx.appType().text === 'application') {
+        if (tellAppCtx.appType().getText() === 'application') {
           // Specifically looking for setting the URL.
           this.checkToStatement(tellArgCtx, function (statementCtx) {
             // Check if URL
@@ -127,7 +128,7 @@ var checkRequestInTell = /*#__PURE__*/function (_checkRequestInIfStat) {
         // if blocks
         var ifBlockCtx = statementCtx.ifBlock();
         if (ifBlockCtx) {
-          _this2.checkIfBlock(ifBlockCtx, _this2.checkTell).forEach(function (request) {
+          _this2.checkIfBlock(ifBlockCtx, _this2.checkTell.bind(_this2)).forEach(function (request) {
             return requests += request;
           });
         }
@@ -271,7 +272,7 @@ var checkRequestInTell = /*#__PURE__*/function (_checkRequestInIfStat) {
         // Check for if statement
         var ifBlockCtx = statementCtx.ifBlock();
         if (ifBlockCtx) {
-          if (_this4.checkIfBlock(ifBlockCtx, _this4.checkTell).every(function (element) {
+          if (_this4.checkIfBlock(ifBlockCtx, _this4.checkTell.bind(_this4)).every(function (element) {
             return element;
           })) {
             error();

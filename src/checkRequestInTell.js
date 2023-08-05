@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.checkRequestInTell = void 0;
 const checkRequestInIfStatement_1 = __importDefault(require("./checkRequestInIfStatement"));
 const checkRequestListener_1 = require("./checkRequestListener");
+// Thought of the day. What if there's more than one request in a tell block? Would we get expected behavior, or did we just forget about that whole thing?
 class checkRequestInTell extends checkRequestInIfStatement_1.default {
     constructor() {
         super();
@@ -17,8 +18,8 @@ class checkRequestInTell extends checkRequestInIfStatement_1.default {
         if (tellAppCtx) {
             const tellArgCtx = tellAppCtx.tellArg();
             // Is it for process Google Chrome?
-            if (tellAppCtx.appType().text === 'process' &&
-                tellAppCtx.STRING().text === 'Google Chrome') {
+            if (tellAppCtx.appType().getText() === 'process' &&
+                tellAppCtx.STRING().getText() === 'Google Chrome') {
                 // Is it just one statement (toStatement)?
                 if (this.checkToStatement(tellArgCtx, (statementCtx) => {
                     return statementCtx.keystroke();
@@ -33,7 +34,7 @@ class checkRequestInTell extends checkRequestInIfStatement_1.default {
                     });
                 }
             }
-            if (tellAppCtx.appType().text === 'application') {
+            if (tellAppCtx.appType().getText() === 'application') {
                 // Specifically looking for setting the URL.
                 this.checkToStatement(tellArgCtx, (statementCtx) => {
                     // Check if URL
@@ -87,7 +88,7 @@ class checkRequestInTell extends checkRequestInIfStatement_1.default {
             // if blocks
             const ifBlockCtx = statementCtx.ifBlock();
             if (ifBlockCtx) {
-                this.checkIfBlock(ifBlockCtx, this.checkTell).forEach((request) => (requests += request));
+                this.checkIfBlock(ifBlockCtx, this.checkTell.bind(this)).forEach((request) => (requests += request));
             }
         });
         return requests;
@@ -208,7 +209,7 @@ class checkRequestInTell extends checkRequestInIfStatement_1.default {
             // Check for if statement
             const ifBlockCtx = statementCtx.ifBlock();
             if (ifBlockCtx) {
-                if (this.checkIfBlock(ifBlockCtx, this.checkTell).every((element) => element)) {
+                if (this.checkIfBlock(ifBlockCtx, this.checkTell.bind(this)).every((element) => element)) {
                     error();
                 }
             }

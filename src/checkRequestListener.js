@@ -40,7 +40,7 @@ class checkRequestListener extends checkRequestInTell_1.checkRequestInTell {
             case 'IfBlockContext': {
                 const ifBlockCtx = parentCtx;
                 const ifStatementCtx = ctx;
-                const count = this.checkIfBlock(ifBlockCtx, this.checkTell, genes.start, ifStatementCtx);
+                const count = this.checkIfBlock(ifBlockCtx, this.checkTell.bind(this), genes.start, ifStatementCtx);
                 if (count.every((element) => element === 0)) {
                     return;
                 }
@@ -76,7 +76,7 @@ class checkRequestListener extends checkRequestInTell_1.checkRequestInTell {
             case 'ErrorHandlerContext': {
                 const errorHandlerCtx = parentCtx;
                 const errorHandlerChildCtx = ctx;
-                const [requests, keystrokes] = this.checkErrorHandler(errorHandlerCtx, this.checkTell, errorHandlerChildCtx, genes.start);
+                const [requests, keystrokes] = this.checkErrorHandler(errorHandlerCtx, this.checkTell.bind(this), errorHandlerChildCtx, genes.start);
                 if (requests === 0 && keystrokes === 0) {
                     return;
                 }

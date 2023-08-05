@@ -76,7 +76,7 @@ var checkRequestListener = /*#__PURE__*/function (_checkRequestInTell_) {
           {
             var ifBlockCtx = parentCtx;
             var ifStatementCtx = ctx;
-            var count = this.checkIfBlock(ifBlockCtx, this.checkTell, genes.start, ifStatementCtx);
+            var count = this.checkIfBlock(ifBlockCtx, this.checkTell.bind(this), genes.start, ifStatementCtx);
             if (count.every(function (element) {
               return element === 0;
             })) {
@@ -118,7 +118,7 @@ var checkRequestListener = /*#__PURE__*/function (_checkRequestInTell_) {
           {
             var errorHandlerCtx = parentCtx;
             var errorHandlerChildCtx = ctx;
-            var _this$checkErrorHandl = this.checkErrorHandler(errorHandlerCtx, this.checkTell, errorHandlerChildCtx, genes.start),
+            var _this$checkErrorHandl = this.checkErrorHandler(errorHandlerCtx, this.checkTell.bind(this), errorHandlerChildCtx, genes.start),
               _this$checkErrorHandl2 = _slicedToArray(_this$checkErrorHandl, 2),
               requests = _this$checkErrorHandl2[0],
               keystrokes = _this$checkErrorHandl2[1];

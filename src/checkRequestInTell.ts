@@ -8,11 +8,20 @@ import {
 import checkRequestInIfStatement from './checkRequestInIfStatement';
 import { Callback, checkFunctionCall } from './checkRequestListener';
 
+// Thought of the day. What if there's more than one request in a tell block? Would we get expected behavior, or did we just forget about that whole thing?
+
+// Only accessable through if block checks.
+
+// So far we only check dups per statement of an if block. If it's a tell block or error handler, it would just see that the block starts before the request and say "ok". We need to check start of statements inside these blocks.
+
+// Also no error handling for miles.
+
 export class checkRequestInTell extends checkRequestInIfStatement {
   constructor() {
     super();
   }
-  checkTell(ctx: TellContext) {
+  // From here on, going to avoid optionals when refactoring and explicitly requiring me to type "false". Leads to less mistakes.
+  checkTell(ctx: TellContext, start: number | false, first: boolean) {
     let requests = 0;
     // Is this for an app?
     const tellAppCtx = ctx.tellApp();
@@ -20,15 +29,22 @@ export class checkRequestInTell extends checkRequestInIfStatement {
       const tellArgCtx = tellAppCtx.tellArg();
       // Is it for process Google Chrome?
       if (
-        tellAppCtx.appType().text === 'process' &&
-        tellAppCtx.STRING().text === 'Google Chrome'
+        tellAppCtx.appType().getText() === 'process' &&
+        tellAppCtx.STRING().getText() === 'Google Chrome'
       ) {
         // Is it just one statement (toStatement)?
+        // check to see if there's a request.
         if (
           this.checkToStatement(
             tellArgCtx,
             (statementCtx: StatementContext) => {
-              return statementCtx.keystroke();
+              // What does it matter if it's first or not?
+              const keystrokeCtx = statementCtx.keystroke();
+              if (
+                this.checkStart(keystrokeCtx, true, [requests, 0], start, first)
+              ) {
+                return keystrokeCtx;
+              }
             }
           )
         ) {
@@ -37,29 +53,62 @@ export class checkRequestInTell extends checkRequestInIfStatement {
         // And if not?
         const statementListCtx = tellArgCtx.statementList();
         if (statementListCtx) {
-          requests += this.checkRequests(
+          // Might be worth it to bake checkStart into checkRequests.
+          const count = this.checkRequests(
             statementListCtx,
             (statementCtx: StatementContext) => {
-              return statementCtx.keystroke();
-            }
+              const keystrokeCtx = statementCtx.keystroke();
+              if (
+                this.checkStart(
+                  keystrokeCtx,
+                  !!keystrokeCtx,
+                  [requests, 0],
+                  start,
+                  first
+                )
+              ) {
+                first = false;
+                return keystrokeCtx;
+              }
+            },
+            start,
+            first
           );
+          requests += count;
         }
       }
-      if (tellAppCtx.appType().text === 'application') {
+      if (tellAppCtx.appType().getText() === 'application') {
         // Specifically looking for setting the URL.
         this.checkToStatement(tellArgCtx, (statementCtx: StatementContext) => {
           // Check if URL
-          if (this.checkUrl(statementCtx)) {
-            requests++;
+          if (
+            this.checkUrl(statementCtx) &&
+            this.checkStart(statementCtx, true, [requests, 0], start, first)
+          ) {
+            {
+              requests++;
+            }
           }
         });
         // We're looking for open locations and set URL's
         const statementListCtx = tellArgCtx.statementList();
         if (statementListCtx) {
-          requests += this.checkRequests(
+          const count = this.checkRequests(
             statementListCtx,
             (statementCtx: StatementContext) => {
-              return this.checkUrl(statementCtx);
+              const URLRequests = this.checkUrl(statementCtx);
+              if (
+                this.checkStart(
+                  statementCtx,
+                  !!URLRequests,
+                  [requests, 0],
+                  start,
+                  first
+                )
+              ) {
+                start = false;
+                return;
+              }
             }
           );
         }
@@ -77,15 +126,21 @@ export class checkRequestInTell extends checkRequestInIfStatement {
     }
   }
 
-  checkRequests(ctx: StatementListContext, requestObjectCallback: Callback) {
+  checkRequests(
+    ctx: StatementListContext,
+    requestObjectCallback: Callback,
+    start: number | false,
+    first: boolean
+  ) {
     // Handle cases where this.reqests would normally be incremented.
     let requests = 0;
-    ctx.statement().forEach((statementCtx) => {
-      // find all requests in statementList
+    for (let statementCtx of ctx.statement()) {
       const requestCtx = requestObjectCallback(statementCtx);
       if (Array.isArray(requestCtx)) {
-        for (let s of requestCtx) {
-          requests++;
+        for (let i of requestCtx) {
+          if (this.checkStart(i, true, [requests, 0], start, first)) {
+            requests++;
+          }
         }
       } else if (requestCtx) {
         requests++;
@@ -111,11 +166,11 @@ export class checkRequestInTell extends checkRequestInIfStatement {
       // if blocks
       const ifBlockCtx = statementCtx.ifBlock();
       if (ifBlockCtx) {
-        this.checkIfBlock(ifBlockCtx, this.checkTell).forEach(
+        this.checkIfBlock(ifBlockCtx, this.checkTell.bind(this)).forEach(
           (request) => (requests += request)
         );
       }
-    });
+    }
     return requests;
   }
 
@@ -247,7 +302,7 @@ export class checkRequestInTell extends checkRequestInIfStatement {
       const ifBlockCtx = statementCtx.ifBlock();
       if (ifBlockCtx) {
         if (
-          this.checkIfBlock(ifBlockCtx, this.checkTell).every(
+          this.checkIfBlock(ifBlockCtx, this.checkTell.bind(this)).every(
             (element) => element
           )
         ) {

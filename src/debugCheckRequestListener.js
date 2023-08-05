@@ -9,7 +9,7 @@ class checkRequestListener extends ASGrammarListener {
     this.functions = functions;
     this.knownFunctions = knownFunctions;
   }
-  enterIfStatement(ctx) {
+  enterSet(ctx) {
     console.log(ctx.expression().getText())
   }
 }

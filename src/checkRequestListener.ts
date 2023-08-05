@@ -109,7 +109,7 @@ class checkRequestListener
           | ElseStatementContext;
         const count = this.checkIfBlock(
           ifBlockCtx,
-          this.checkTell,
+          this.checkTell.bind(this),
           genes.start,
           ifStatementCtx
         );
@@ -151,7 +151,7 @@ class checkRequestListener
         const errorHandlerChildCtx = ctx as StatementListContext;
         const [requests, keystrokes] = this.checkErrorHandler(
           errorHandlerCtx,
-          this.checkTell,
+          this.checkTell.bind(this),
           errorHandlerChildCtx,
           genes.start
         );

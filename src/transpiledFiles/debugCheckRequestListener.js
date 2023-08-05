@@ -35,8 +35,8 @@ var checkRequestListener = /*#__PURE__*/function (_ASGrammarListener) {
     return _this;
   }
   _createClass(checkRequestListener, [{
-    key: "enterIfStatement",
-    value: function enterIfStatement(ctx) {
+    key: "enterSet",
+    value: function enterSet(ctx) {
       console.log(ctx.expression().getText());
     }
   }]);
