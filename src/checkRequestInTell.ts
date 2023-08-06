@@ -1,4 +1,3 @@
-import { TerminalNode } from 'antlr4ts/tree/TerminalNode';
 import {
   StatementContext,
   StatementListContext,
@@ -6,12 +5,9 @@ import {
   TellContext,
   ValueContext,
 } from './ASGrammarParser';
+import CheckBlock, { checkBlockOptions } from './checkBlock';
 import checkRequestInIfStatement from './checkRequestInIfStatement';
-import {
-  Callback,
-  checkFunctionCall,
-  ContextCallback,
-} from './checkRequestListener';
+import { Callback } from './checkRequestListener';
 
 // Thought of the day. What if there's more than one request in a tell block? Would we get expected behavior, or did we just forget about that whole thing?
 
@@ -21,17 +17,16 @@ import {
 
 // Also no error handling for miles.
 
-export class checkRequestInTell extends checkRequestInIfStatement {
-  constructor() {
-    super();
-  }
-  // From here on, going to avoid optionals when refactoring and explicitly requiring me to type "false". Leads to less mistakes.
-  checkTell(ctx: TellContext, start: number | false, first: boolean) {
-    let requests = 0;
+export class checkRequestInTell extends CheckBlock {
+  ctx: TellContext;
+  constructor(options: checkBlockOptions, ctx: TellContext) {
+    super(options);
+    this.ctx = ctx;
     // Is this for an app?
     const tellAppCtx = ctx.tellApp();
     if (tellAppCtx) {
       const tellArgCtx = tellAppCtx.tellArg();
+      const statementListCtx = tellArgCtx.statementList();
       // Is it for process Google Chrome?
       if (
         tellAppCtx.appType().getText() === 'process' &&
@@ -39,122 +34,63 @@ export class checkRequestInTell extends checkRequestInIfStatement {
       ) {
         // Is it just one statement (toStatement)?
         // check to see if there's a request.
-        const toStatementCtx = this.checkToStatement(
-          tellArgCtx,
-          (statementCtx: StatementContext) => {
-            const keystrokeCtx = statementCtx.keystroke();
-            // Check if keystrokeCtx is truthy
-            if (
-              this.checkStart(keystrokeCtx, true, [requests, 0], start, first)
-            ) {
+        if (
+          this.checkToStatement(
+            tellArgCtx,
+            (statementCtx: StatementContext) => {
+              const keystrokeCtx = statementCtx.keystroke();
+              this.checkStart(keystrokeCtx, true);
               return keystrokeCtx;
-            } else if (keystrokeCtx) {
-              return false;
             }
-          }
-        );
-        if (toStatementCtx) {
-          requests++;
-        } else if (toStatementCtx === false) {
-          return false;
+          )
+        ) {
+          this.first = false;
+          this.requests++;
         }
         // And if not?
-        const statementListCtx = tellArgCtx.statementList();
-        if (statementListCtx) {
-          // Might be worth it to bake checkStart into checkRequests.
-          // kinda? checkURL returns terminal nodes. Those don't have start values.
-          // I'd suggest just checkStart on statementCtx as opposed to the return of checkURL.
-          const count = this.checkRequests(
+        else if (statementListCtx) {
+          // update check requests to set state.
+          this.checkRequests(
             statementListCtx,
             (statementCtx: StatementContext) => {
               const keystrokeCtx = statementCtx.keystroke();
-              if (
-                this.checkStart(
-                  keystrokeCtx,
-                  !!keystrokeCtx,
-                  [requests, 0],
-                  start,
-                  first
-                )
-              ) {
-                first = false;
-                if (keystrokeCtx) {
-                  return keystrokeCtx;
-                }
-              } else {
-                return false;
+              if (keystrokeCtx) {
+                this.checkStart(keystrokeCtx, !!keystrokeCtx);
+                this.first = false;
+                this.requests++;
               }
-            },
-            start,
-            first
+            }
           );
-          if (count) {
-            requests += count;
-          } else if (count === false) {
-            return false;
-          }
         }
       }
       if (tellAppCtx.appType().getText() === 'application') {
         // Specifically looking for setting the URL.
-        const toStatementRequest = this.checkToStatement(
-          tellArgCtx,
-          (statementCtx: StatementContext) => {
-            // Check if URL
-            const OGToStatementRequest = this.checkStart(
-              statementCtx,
-              true,
-              [requests, 0],
-              start,
-              first
-            );
-            if (
-              this.checkUrl(statementCtx, start, first) &&
-              OGToStatementRequest
-            ) {
-              requests++;
-            } else if (!statementCtx) {
-              return false;
+        this.checkToStatement(tellArgCtx, (statementCtx: StatementContext) => {
+          // Check if URL
+          if (this.checkUrl(statementCtx)) {
+            {
+              this.checkStart(statementCtx, true);
+              this.requests++;
             }
           }
-        );
-        if (toStatementRequest === false) {
-          return false;
-        }
+        });
         // We're looking for open locations and set URL's
         const statementListCtx = tellArgCtx.statementList();
         if (statementListCtx) {
-          const count = this.checkRequests(
+          this.checkRequests(
             statementListCtx,
             (statementCtx: StatementContext) => {
-              const URLRequests = this.checkUrl(statementCtx, start, first);
-              const OGURL = this.checkStart(
-                statementCtx,
-                !!URLRequests,
-                [requests, 0],
-                start,
-                first
-              );
-              if (OGURL) {
-                start = false;
-                return statementCtx;
-              } else if (OGURL === false) {
-                return false;
+              if (this.checkUrl(statementCtx)) {
+                this.requests++;
+                this.checkStart(statementCtx, true);
+                this.first = false;
               }
-            },
-            start,
-            first
+            }
           );
-          if (count) {
-            requests += count;
-          } else if (count === false) {
-            return false;
-          }
         }
         // to my knowledge there isn't such a thing as a tellApp inside a tellId.
       }
     }
-    return requests;
   }
 
   checkToStatement(ctx: TellArgContext, callback: Callback) {
@@ -165,21 +101,10 @@ export class checkRequestInTell extends checkRequestInIfStatement {
     }
   }
 
-  checkRequests(
-    ctx: StatementListContext,
-    requestObjectCallback: ContextCallback,
-    start: number | false,
-    first: boolean
-  ) {
+  checkRequests(ctx: StatementListContext, requestObjectCallback: Callback) {
     // Handle cases where this.reqests would normally be incremented.
-    let requests = 0;
     for (let statementCtx of ctx.statement()) {
-      const requestCtx = requestObjectCallback(statementCtx);
-      if (requestCtx) {
-        requests++;
-      } else if (requestCtx === false) {
-        return false;
-      }
+      requestObjectCallback(statementCtx);
 
       // Loops
       // Will throw an error if it finds any requests.
@@ -188,32 +113,30 @@ export class checkRequestInTell extends checkRequestInIfStatement {
       // Function calls
       const functionCallCtx = statementCtx.functionCall();
       if (functionCallCtx) {
-        checkFunctionCall(
-          functionCallCtx,
-          (func) => {
-              requests += func.requests + func.keystrokes;
-          },
-          this.functions,
-          this.knownFunctions
-        );
+        this.checkFunctionCall(functionCallCtx, (func) => {
+          this.requests += func.requests + func.keystrokes;
+        });
       }
 
       // if blocks
       const ifBlockCtx = statementCtx.ifBlock();
       if (ifBlockCtx) {
-        this.checkIfBlock(
+        const ifBlockRequests = new checkRequestInIfStatement(
+          { ...this },
           ifBlockCtx,
-          this.checkTell.bind(this),
-          start,
-          false,
-          first
+          false
         );
+        this.updateProps(ifBlockRequests);
+      }
+      const errorHandlerCtx = statementCtx.errorHandler()
+      if (errorHandlerCtx) {
+        this.checkErrorHandler(errorHandlerCtx)
       }
     }
-    return requests;
   }
+  // From here on, going to avoid optionals when refactoring and explicitly requiring me to type "false". Leads to less mistakes.
 
-  checkUrl(ctx: StatementContext, start: number | false, first: boolean) {
+  checkUrl(ctx: StatementContext) {
     const tellCtx = ctx.tell();
     if (tellCtx) {
       const tellIdCtx = tellCtx.tellId();
@@ -226,32 +149,13 @@ export class checkRequestInTell extends checkRequestInIfStatement {
           (statementCtx: StatementContext) => {
             return this.checkSet(statementCtx);
           }
-        ) as TerminalNode | undefined;
+        );
         if (toStatementCtx) {
           return toStatementCtx;
         }
         const statementListCtx = tellArgCtx.statementList();
         if (statementListCtx) {
-          return this.checkRequests(
-            statementListCtx,
-            (statementCtx: StatementContext) => {
-              const URLRequests = this.checkUrl(statementCtx, start, first);
-              if (
-                this.checkStart(
-                  statementCtx,
-                  !!URLRequests,
-                  [0, 0],
-                  start,
-                  first
-                )
-              ) {
-                start = false;
-                return statementCtx;
-              }
-            },
-            start,
-            first
-          );
+          return statementListCtx.statement();
         }
       }
     }
@@ -347,27 +251,27 @@ export class checkRequestInTell extends checkRequestInIfStatement {
       const functionCallCtx = statementCtx.functionCall();
       if (functionCallCtx) {
         // If it exists, it has a non-zero amount of requests
-        checkFunctionCall(
-          functionCallCtx,
-          () => {
-            error();
-          },
-          this.functions,
-          this.knownFunctions
-        );
+        this.checkFunctionCall(functionCallCtx, () => {
+          error();
+        });
       }
       // Check for if statement
       const ifBlockCtx = statementCtx.ifBlock();
       if (ifBlockCtx) {
-        if (
-          this.checkIfBlock(
-            ifBlockCtx,
-            this.checkTell.bind(this),
-            false,
-            ifBlockCtx.ifStatement(),
-            false
-          )
-        ) {
+        const ifBlockRequests = new checkRequestInIfStatement(
+          {
+            functions: this.functions,
+            knownFunctions: this.knownFunctions,
+            start: false,
+            first: false,
+            requests: 0,
+            keystrokes: 0,
+            dup: false,
+          },
+          ifBlockCtx,
+          false
+        );
+        if (ifBlockRequests.requests || ifBlockRequests.keystrokes) {
           error();
         }
       }

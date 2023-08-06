@@ -13,120 +13,36 @@ function _possibleConstructorReturn(self, call) { if (call && (_typeof(call) ===
 function _assertThisInitialized(self) { if (self === void 0) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return self; }
 function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Reflect.construct) return false; if (Reflect.construct.sham) return false; if (typeof Proxy === "function") return true; try { Boolean.prototype.valueOf.call(Reflect.construct(Boolean, [], function () {})); return true; } catch (e) { return false; } }
 function _getPrototypeOf(o) { _getPrototypeOf = Object.setPrototypeOf ? Object.getPrototypeOf.bind() : function _getPrototypeOf(o) { return o.__proto__ || Object.getPrototypeOf(o); }; return _getPrototypeOf(o); }
+var __importDefault = void 0 && (void 0).__importDefault || function (mod) {
+  return mod && mod.__esModule ? mod : {
+    "default": mod
+  };
+};
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.checkFunctionCall = void 0;
-var checkRequestInTell_1 = require("./checkRequestInTell");
+var checkBlock_1 = __importDefault(require("./checkBlock"));
+var parentCtx_1 = __importDefault(require("./parentCtx"));
+var _require = require('./ASGrammarListener'),
+  ASGrammarListener = _require["default"];
 // checkFunctionCall function
-var checkFunctionCall = function checkFunctionCall(ctx, callback, functions, knownFunctions) {
-  var funcName = ctx.IDENTIFIER().getText();
-  if (!knownFunctions.includes(funcName)) {
-    throw new Error('This new and improved AppleScript parser has the feature of throwing a syntax error every time you have a handler call before its declaration. I assure you, this is not a bug. Trust me bro.');
-    // In all honesty, this "feature" would likely never make it into the final release, so I decided to have a little fun with this one :)
-  }
-
-  var func = functions[funcName];
-  if (func) {
-    callback(func);
-  }
-};
-exports.checkFunctionCall = checkFunctionCall;
-var checkRequestListener = /*#__PURE__*/function (_checkRequestInTell_) {
-  _inherits(checkRequestListener, _checkRequestInTell_);
+var checkRequestListener = /*#__PURE__*/function (_ASGrammarListener) {
+  _inherits(checkRequestListener, _ASGrammarListener);
   var _super = _createSuper(checkRequestListener);
   function checkRequestListener() {
     var _this;
     var requests = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : 0;
+    var functions = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+    var knownFunctions = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : [];
     _classCallCheck(this, checkRequestListener);
     _this = _super.call(this);
     _this.requests = requests;
+    _this.functions = functions;
+    _this.knownFunctions = knownFunctions;
     return _this;
   }
-  // check function call method
+  // enter methods
   _createClass(checkRequestListener, [{
-    key: "checkFunctionCall",
-    value: function checkFunctionCall(ctx, callback) {
-      (0, exports.checkFunctionCall)(ctx, callback, this.functions, this.knownFunctions);
-    }
-    // Check parent
-  }, {
-    key: "checkParentCtx",
-    value: function checkParentCtx(ctx, genes) {
-      // Other than recursive calls, there's only 4 inputs that are going to be fed into this: set URL, keystroke return, open location and functionCall.
-      var parentCtx = ctx.parentCtx;
-      switch (parentCtx.constructor.name) {
-        case 'ProgramContext':
-          {
-            this.requests += genes.requests;
-            return;
-          }
-        case 'LoopStatementContext':
-          {
-            // why would we be checking a functionCall unless it had a request in it? just throw the error
-            throw new Error('Request detected inside loop');
-          }
-        case 'IfBlockContext':
-          {
-            var ifBlockCtx = parentCtx;
-            var ifStatementCtx = ctx;
-            var count = this.checkIfBlock(ifBlockCtx, this.checkTell.bind(this), genes.start, ifStatementCtx, true);
-            if (count) {
-              if (count.every(function (element) {
-                return element === 0;
-              })) {
-                return;
-              }
-              genes.requests = count[0];
-              genes.keystrokes = count[1];
-              break;
-            }
-          }
-        case 'tellApp':
-          {
-            var tellAppCtx = parentCtx;
-            if (tellAppCtx.appType().getText() === 'process' && tellAppCtx.STRING().getText() === 'Google Chrome') {
-              genes.inTell = true;
-            }
-            break;
-          }
-        case 'FunctionDeclarationContext':
-          {
-            // add the current requests and keystrokes to the count for the declaration. If there are more requests they'll also be calced and added to the count for the declaration.
-            var functionDeclarationCtx = parentCtx;
-            var funcName = functionDeclarationCtx.IDENTIFIER(0).getText();
-            if (!(funcName in this.functions)) {
-              this.functions[funcName] = {
-                requests: 0,
-                keystrokes: 0
-              };
-            }
-            this.functions[funcName].requests += genes.requests;
-            if (genes.inTell) {
-              this.functions[funcName].requests += genes.keystrokes;
-            } else {
-              this.functions[funcName].keystrokes += genes.keystrokes;
-            }
-            // According to AS syntax, function declarations are always at the top level. So only thing above this is statement => program. Safe to return here.
-            return;
-          }
-        case 'ErrorHandlerContext':
-          {
-            var errorHandlerCtx = parentCtx;
-            var errorRequests = this.checkErrorHandler(errorHandlerCtx, this.checkTell.bind(this), genes.start, true);
-            if (errorRequests) {
-              genes.requests += errorRequests[0];
-              genes.keystrokes += errorRequests[1];
-            }
-          }
-      }
-      if (genes.inTell) {
-        genes.requests += genes.keystrokes;
-      }
-      this.checkParentCtx(parentCtx, genes);
-    }
-    // enter methods
-  }, {
     key: "enterFunctionDeclaration",
     value: function enterFunctionDeclaration(ctx) {
       this.knownFunctions.push(ctx.IDENTIFIER(0).getText());
@@ -136,58 +52,48 @@ var checkRequestListener = /*#__PURE__*/function (_checkRequestInTell_) {
     value: function enterKeystroke(ctx) {
       var _a;
       if (((_a = ctx.expression()) === null || _a === void 0 ? void 0 : _a.getText()) === 'return') {
-        var dna = {
-          requests: 0,
-          keystrokes: 1,
-          inTell: false,
-          start: ctx.start.start
-        };
-        this.checkParentCtx(ctx, dna);
+        var parentCtxRequests = new parentCtx_1["default"](1, false, ctx.start.start, ctx, this.functions, this.knownFunctions);
+        this.requests += parentCtxRequests.requests;
+        this.functions = parentCtxRequests.functions;
       }
     }
   }, {
     key: "enterSet",
     value: function enterSet(ctx) {
       if (ctx.operation().value(0).getText() === 'URL') {
-        var dna = {
-          requests: 1,
-          keystrokes: 0,
-          inTell: false,
-          start: ctx.start.start
-        };
-        this.checkParentCtx(ctx, dna);
+        var parentCtxRequests = new parentCtx_1["default"](0, false, ctx.start.start, ctx, this.functions, this.knownFunctions, 1);
+        this.requests += parentCtxRequests.requests;
+        this.functions = parentCtxRequests.functions;
       }
     }
   }, {
     key: "enterOpenLocation",
     value: function enterOpenLocation(ctx) {
       // The only one that's 100% a request no matter what. Unless it's a syntax error of course.
-      var dna = {
-        requests: 1,
-        keystrokes: 0,
-        inTell: false,
-        start: ctx.start.start
-      };
-      this.checkParentCtx(ctx, dna);
+      var parentCtxRequests = new parentCtx_1["default"](0, false, ctx.start.start, ctx, this.functions, this.knownFunctions, 1);
+      this.requests += parentCtxRequests.requests;
+      this.functions = parentCtxRequests.functions;
     }
   }, {
     key: "enterFunctionCall",
     value: function enterFunctionCall(ctx) {
       var _this2 = this;
       // access function info
-      this.checkFunctionCall(ctx, function (func) {
-        if (func) {
-          var dna = {
-            requests: func.requests,
-            keystrokes: func.keystrokes,
-            inTell: false,
-            start: ctx.start.start
-          };
-          _this2.checkParentCtx(ctx, dna);
-        }
+      new checkBlock_1["default"]({
+        functions: this.functions,
+        knownFunctions: this.knownFunctions,
+        start: false,
+        first: false,
+        requests: 0,
+        keystrokes: 0,
+        dup: false
+      }).checkFunctionCall(ctx, function (func) {
+        var parentCtxRequests = new parentCtx_1["default"](func.keystrokes, false, ctx.start.start, ctx, _this2.functions, _this2.knownFunctions, func.requests);
+        _this2.requests += parentCtxRequests.requests;
+        _this2.functions = parentCtxRequests.functions;
       });
     }
   }]);
   return checkRequestListener;
-}(checkRequestInTell_1.checkRequestInTell);
+}(ASGrammarListener);
 exports["default"] = checkRequestListener;

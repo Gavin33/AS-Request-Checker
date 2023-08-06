@@ -3,19 +3,16 @@ import { ParserRuleContext } from 'antlr4ts';
 import { ASGrammarListener } from './ASGrammarListener';
 import {
   FunctionCallContext,
-  IfBlockContext,
   OpenLocationContext,
-  ElseIfContext,
-  ElseStatementContext,
-  IfStatementContext,
   FunctionDeclarationContext,
-  TellAppContext,
   SetContext,
-  ErrorHandlerContext,
   KeystrokeContext,
   StatementContext,
 } from './ASGrammarParser';
-import { checkRequestInTell } from './checkRequestInTell';
+import CheckBlock, { FunctionProperties } from './checkBlock';
+import parentCtx from './parentCtx';
+
+// const { default: ASGrammarListener } = require('./ASGrammarListener');
 
 // Note: there are going to be a huge number of type errors on the typescript files on your side most likely. Antlr4ts is still in alpha, so there are quite a few errors. Main issues that come up are some misnamed properties/methods on some of the classes. I don't want to purposely use the wrong syntax just to make ts happy, so I made a few bug fixes to antlr4ts on my end instead.
 
@@ -26,246 +23,34 @@ import { checkRequestInTell } from './checkRequestInTell';
 // Keystrokes cannot be generated from an enter method alone. Has to be logged as part of some kind of block (functionDeclaration, errorHandler, ifBlock, etc.)
 
 // I could call it ParentProps, but that's just a fancy way of saying genes.
-interface Genes {
-  requests: number;
-  keystrokes: number;
-  inTell: boolean;
-  start: number;
-}
 
-type FunctionCallback = (functionProperties: FunctionProperties) => void;
-
-export type ContextCallback = (
+type ContextCallback = (
   ctx: StatementContext
-) => ParserRuleContext | false | undefined;
+) => ParserRuleContext | TerminalNode | undefined;
 type ArrayCallback = (
   ctx: StatementContext
 ) => ParserRuleContext[] | TerminalNode[] | undefined;
 type VoidCallback = (ctx: StatementContext) => void;
 
-export interface FunctionProperties {
-  requests: number;
-  keystrokes: number;
-}
-
 export type Callback = ContextCallback | ArrayCallback | VoidCallback;
 
 // checkFunctionCall function
-export const checkFunctionCall = (
-  ctx: FunctionCallContext,
-  callback: FunctionCallback,
-  functions: { [key: string]: FunctionProperties },
-  knownFunctions: string[]
-) => {
-  const funcName = ctx.IDENTIFIER().getText();
-  if (!knownFunctions.includes(funcName)) {
-    throw new Error(
-      'This new and improved AppleScript parser has the feature of throwing a syntax error every time you have a handler call before its declaration. I assure you, this is not a bug. Trust me bro.'
-    );
-    // In all honesty, this "feature" would likely never make it into the final release, so I decided to have a little fun with this one :)
-  }
-  const func = functions[funcName];
-  if (func) {
-    callback(func);
-  }
-};
 
-class checkParentCtx extends checkRequestInTell {
-  genes: Genes;
+class checkRequestListener implements ASGrammarListener {
+  // extends ASGrammarListener
   requests: number;
   functions: { [key: string]: FunctionProperties };
   knownFunctions: string[];
+
   constructor(
-    ctx: ParserRuleContext,
-    genes: Genes,
     requests: number = 0,
-    functions: { [key: string]: FunctionProperties },
-    knownFunctions: string[]
+    functions: { [key: string]: FunctionProperties } = {},
+    knownFunctions: string[] = []
   ) {
-    super();
-    this.genes = genes;
+    // super();
     this.requests = requests;
     this.functions = functions;
     this.knownFunctions = knownFunctions;
-    this.checkParentCtx(ctx)
-  }
-  checkParentCtx(ctx: ParserRuleContext) {
-    // Other than recursive calls, there's only 4 inputs that are going to be fed into this: set URL, keystroke return, open location and functionCall.
-    const parentCtx = ctx.parentCtx;
-    switch (parentCtx.constructor.name) {
-      case 'ProgramContext': {
-        this.requests += this.genes.requests;
-        return;
-      }
-      case 'LoopStatementContext': {
-        // why would we be checking a functionCall unless it had a request in it? just throw the error
-        throw new Error('Request detected inside loop');
-      }
-      case 'IfBlockContext': {
-        const ifBlockCtx = parentCtx as IfBlockContext;
-        const ifStatementCtx = ctx as
-          | IfStatementContext
-          | ElseIfContext
-          | ElseStatementContext;
-        const count = this.checkIfBlock(
-          ifBlockCtx,
-          this.checkTell.bind(this),
-          this.genes.start,
-          ifStatementCtx,
-          true
-        );
-        if (count) {
-          if (count.every((element) => element === 0)) {
-            return;
-          }
-          this.genes.requests = count[0];
-          this.genes.keystrokes = count[1];
-          break;
-        }
-      }
-      case 'tellApp': {
-        const tellAppCtx = parentCtx as TellAppContext;
-        if (
-          tellAppCtx.appType().getText() === 'process' &&
-          tellAppCtx.STRING().getText() === 'Google Chrome'
-        ) {
-          this.genes.inTell = true;
-        }
-        break;
-      }
-      case 'FunctionDeclarationContext': {
-        // add the current requests and keystrokes to the count for the declaration. If there are more requests they'll also be calced and added to the count for the declaration.
-        const functionDeclarationCtx = parentCtx as FunctionDeclarationContext;
-        const funcName = functionDeclarationCtx.IDENTIFIER(0).getText();
-        if (!(funcName in this.functions)) {
-          this.functions[funcName] = { requests: 0, keystrokes: 0 };
-        }
-        this.functions[funcName].requests += this.genes.requests;
-        if (this.genes.inTell) {
-          this.functions[funcName].requests += this.genes.keystrokes;
-        } else {
-          this.functions[funcName].keystrokes += this.genes.keystrokes;
-        }
-        // According to AS syntax, function declarations are always at the top level. So only thing above this is statement => program. Safe to return here.
-        return;
-      }
-      case 'ErrorHandlerContext': {
-        const errorHandlerCtx = parentCtx as ErrorHandlerContext;
-        const errorRequests = this.checkErrorHandler(
-          errorHandlerCtx,
-          this.checkTell.bind(this),
-          this.genes.start,
-          true
-        );
-        if (errorRequests) {
-          this.genes.requests += errorRequests[0];
-          this.genes.keystrokes += errorRequests[1];
-        }
-      }
-    }
-    if (this.genes.inTell) {
-      this.genes.requests += this.genes.keystrokes;
-    }
-    this.checkParentCtx(parentCtx);
-  }
-}
-
-class checkRequestListener
-  // extends checkRequestInTell
-  implements ASGrammarListener
-{
-  // extends ASGrammarListener
-  requests: number;
-
-  constructor(requests: number = 0) {
-    // super();
-    this.requests = requests;
-  }
-  // check function call method
-  checkFunctionCall(ctx: FunctionCallContext, callback: FunctionCallback) {
-    checkFunctionCall(ctx, callback, this.functions, this.knownFunctions);
-  }
-
-  // Check parent
-
-  checkParentCtx(ctx: ParserRuleContext, genes: Genes) {
-    // Other than recursive calls, there's only 4 inputs that are going to be fed into this: set URL, keystroke return, open location and functionCall.
-    const parentCtx = ctx.parentCtx;
-    switch (parentCtx.constructor.name) {
-      case 'ProgramContext': {
-        this.requests += genes.requests;
-        return;
-      }
-      case 'LoopStatementContext': {
-        // why would we be checking a functionCall unless it had a request in it? just throw the error
-        throw new Error('Request detected inside loop');
-      }
-      case 'IfBlockContext': {
-        const ifBlockCtx = parentCtx as IfBlockContext;
-        const ifStatementCtx = ctx as
-          | IfStatementContext
-          | ElseIfContext
-          | ElseStatementContext;
-        const count = this.checkIfBlock(
-          ifBlockCtx,
-          this.checkTell.bind(this),
-          genes.start,
-          ifStatementCtx,
-          true
-        );
-        if (count) {
-          if (count.every((element) => element === 0)) {
-            return;
-          }
-          genes.requests = count[0];
-          genes.keystrokes = count[1];
-          break;
-        }
-      }
-      case 'tellApp': {
-        const tellAppCtx = parentCtx as TellAppContext;
-        if (
-          tellAppCtx.appType().getText() === 'process' &&
-          tellAppCtx.STRING().getText() === 'Google Chrome'
-        ) {
-          genes.inTell = true;
-        }
-        break;
-      }
-      case 'FunctionDeclarationContext': {
-        // add the current requests and keystrokes to the count for the declaration. If there are more requests they'll also be calced and added to the count for the declaration.
-        const functionDeclarationCtx = parentCtx as FunctionDeclarationContext;
-        const funcName = functionDeclarationCtx.IDENTIFIER(0).getText();
-        if (!(funcName in this.functions)) {
-          this.functions[funcName] = { requests: 0, keystrokes: 0 };
-        }
-        this.functions[funcName].requests += genes.requests;
-        if (genes.inTell) {
-          this.functions[funcName].requests += genes.keystrokes;
-        } else {
-          this.functions[funcName].keystrokes += genes.keystrokes;
-        }
-        // According to AS syntax, function declarations are always at the top level. So only thing above this is statement => program. Safe to return here.
-        return;
-      }
-      case 'ErrorHandlerContext': {
-        const errorHandlerCtx = parentCtx as ErrorHandlerContext;
-        const errorRequests = this.checkErrorHandler(
-          errorHandlerCtx,
-          this.checkTell.bind(this),
-          genes.start,
-          true
-        );
-        if (errorRequests) {
-          genes.requests += errorRequests[0];
-          genes.keystrokes += errorRequests[1];
-        }
-      }
-    }
-    if (genes.inTell) {
-      genes.requests += genes.keystrokes;
-    }
-    this.checkParentCtx(parentCtx, genes);
   }
 
   // enter methods
@@ -276,51 +61,64 @@ class checkRequestListener
 
   enterKeystroke(ctx: KeystrokeContext) {
     if (ctx.expression()?.getText() === 'return') {
-      const dna: Genes = {
-        requests: 0,
-        keystrokes: 1,
-        inTell: false,
-        start: ctx.start.start,
-      };
-      this.checkParentCtx(ctx, dna);
+      const parentCtxRequests = new parentCtx(
+        1,
+        false,
+        ctx.start.start,
+        ctx,
+        this.functions,
+        this.knownFunctions
+      );
+      this.requests += parentCtxRequests.requests
+      this.functions = parentCtxRequests.functions
     }
   }
 
   enterSet(ctx: SetContext) {
     if (ctx.operation().value(0).getText() === 'URL') {
-      const dna: Genes = {
-        requests: 1,
-        keystrokes: 0,
-        inTell: false,
-        start: ctx.start.start,
-      };
-      this.checkParentCtx(ctx, dna);
+      const parentCtxRequests = new parentCtx(
+        0,
+        false,
+        ctx.start.start,
+        ctx,
+        this.functions,
+        this.knownFunctions,
+        1
+      );
+      this.requests += parentCtxRequests.requests
+      this.functions = parentCtxRequests.functions
     }
   }
 
   enterOpenLocation(ctx: OpenLocationContext) {
     // The only one that's 100% a request no matter what. Unless it's a syntax error of course.
-    const dna: Genes = {
-      requests: 1,
-      keystrokes: 0,
-      inTell: false,
-      start: ctx.start.start,
-    };
-    this.checkParentCtx(ctx, dna);
+    const parentCtxRequests = new parentCtx(
+      0,
+      false,
+      ctx.start.start,
+      ctx,
+      this.functions,
+      this.knownFunctions,
+      1
+    );
+    this.requests += parentCtxRequests.requests
+    this.functions = parentCtxRequests.functions
   }
 
   enterFunctionCall(ctx: FunctionCallContext) {
     // access function info
-    this.checkFunctionCall(ctx, (func) => {
-      if (func) {
-        const dna: Genes = {
-          requests: func.requests,
-          keystrokes: func.keystrokes,
-          inTell: false,
-          start: ctx.start.start,
-        };
-        this.checkParentCtx(ctx, dna);
-      }
+    new CheckBlock({functions: this.functions, knownFunctions: this.knownFunctions, start: false, first: false, requests: 0, keystrokes: 0, dup: false}).checkFunctionCall(ctx, (func) => {
+      const parentCtxRequests = new parentCtx(
+        func.keystrokes,
+        false,
+        ctx.start.start,
+        ctx,
+        this.functions,
+        this.knownFunctions,
+        func.requests
+      );
+      this.requests += parentCtxRequests.requests
+      this.functions = parentCtxRequests.functions
     });
   }
 }

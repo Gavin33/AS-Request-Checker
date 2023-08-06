@@ -4,8 +4,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.checkRequestInTell = void 0;
+const checkBlock_1 = __importDefault(require("./checkBlock"));
 const checkRequestInIfStatement_1 = __importDefault(require("./checkRequestInIfStatement"));
-const checkRequestListener_1 = require("./checkRequestListener");
 // Thought of the day. What if there's more than one request in a tell block? Would we get expected behavior, or did we just forget about that whole thing?
 // Only accessable through if block checks.
 // So far we only check dups per statement of an if block. If it's a tell block or error handler, it would just see that the block starts before the request and say "ok". We need to check start of statements inside these blocks.
@@ -21,6 +21,7 @@ class checkRequestInTell extends checkRequestInIfStatement_1.default {
         const tellAppCtx = ctx.tellApp();
         if (tellAppCtx) {
             const tellArgCtx = tellAppCtx.tellArg();
+            const statementListCtx = tellArgCtx.statementList();
             // Is it for process Google Chrome?
             if (tellAppCtx.appType().getText() === 'process' &&
                 tellAppCtx.STRING().getText() === 'Google Chrome') {
@@ -33,7 +34,8 @@ class checkRequestInTell extends checkRequestInIfStatement_1.default {
                         return keystrokeCtx;
                     }
                 })) {
-                    requests++;
+                    this.first = false;
+                    this.requests++;
                 }
                 // And if not?
                 const statementListCtx = tellArgCtx.statementList();
@@ -81,7 +83,6 @@ class checkRequestInTell extends checkRequestInIfStatement_1.default {
                 // to my knowledge there isn't such a thing as a tellApp inside a tellId.
             }
         }
-        return requests;
     }
     checkToStatement(ctx, callback) {
         const toStatementCtx = ctx.toStatement();
@@ -233,9 +234,9 @@ class checkRequestInTell extends checkRequestInIfStatement_1.default {
             const functionCallCtx = statementCtx.functionCall();
             if (functionCallCtx) {
                 // If it exists, it has a non-zero amount of requests
-                (0, checkRequestListener_1.checkFunctionCall)(functionCallCtx, () => {
+                this.checkFunctionCall(functionCallCtx, () => {
                     error();
-                }, this.functions, this.knownFunctions);
+                });
             }
             // Check for if statement
             const ifBlockCtx = statementCtx.ifBlock();

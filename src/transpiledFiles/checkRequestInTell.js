@@ -25,91 +25,78 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 exports.checkRequestInTell = void 0;
+var checkBlock_1 = __importDefault(require("./checkBlock"));
 var checkRequestInIfStatement_1 = __importDefault(require("./checkRequestInIfStatement"));
-var checkRequestListener_1 = require("./checkRequestListener");
 // Thought of the day. What if there's more than one request in a tell block? Would we get expected behavior, or did we just forget about that whole thing?
 // Only accessable through if block checks.
 // So far we only check dups per statement of an if block. If it's a tell block or error handler, it would just see that the block starts before the request and say "ok". We need to check start of statements inside these blocks.
 // Also no error handling for miles.
-var checkRequestInTell = /*#__PURE__*/function (_checkRequestInIfStat) {
-  _inherits(checkRequestInTell, _checkRequestInIfStat);
+var checkRequestInTell = /*#__PURE__*/function (_checkBlock_1$default) {
+  _inherits(checkRequestInTell, _checkBlock_1$default);
   var _super = _createSuper(checkRequestInTell);
-  function checkRequestInTell() {
+  function checkRequestInTell(options, ctx) {
+    var _this;
     _classCallCheck(this, checkRequestInTell);
-    return _super.call(this);
-  }
-  // From here on, going to avoid optionals when refactoring and explicitly requiring me to type "false". Leads to less mistakes.
-  _createClass(checkRequestInTell, [{
-    key: "checkTell",
-    value: function checkTell(ctx, start, first) {
-      var _this = this;
-      var requests = 0;
-      // Is this for an app?
-      var tellAppCtx = ctx.tellApp();
-      if (tellAppCtx) {
-        var tellArgCtx = tellAppCtx.tellArg();
-        // Is it for process Google Chrome?
-        if (tellAppCtx.appType().getText() === 'process' && tellAppCtx.STRING().getText() === 'Google Chrome') {
-          // Is it just one statement (toStatement)?
-          // check to see if there's a request.
-          if (this.checkToStatement(tellArgCtx, function (statementCtx) {
-            // What does it matter if it's first or not?
-            var keystrokeCtx = statementCtx.keystroke();
-            if (_this.checkStart(keystrokeCtx, true, [requests, 0], start, first)) {
-              return keystrokeCtx;
-            }
-          })) {
-            requests++;
-          }
-          // And if not?
-          var statementListCtx = tellArgCtx.statementList();
-          if (statementListCtx) {
-            // Might be worth it to bake checkStart into checkRequests.
-            // kinda? checkURL returns terminal nodes. Those don't have start values.
-            // I'd suggest just checkStart on statementCtx as opposed to the return of checkURL.
-            var count = this.checkRequests(statementListCtx, function (statementCtx) {
-              var keystrokeCtx = statementCtx.keystroke();
-              if (_this.checkStart(keystrokeCtx, !!keystrokeCtx, [requests, 0], start, first)) {
-                first = false;
-                return keystrokeCtx;
-              }
-            }, start, first);
-            requests += count;
-          }
+    _this = _super.call(this, options);
+    _this.ctx = ctx;
+    // Is this for an app?
+    var tellAppCtx = ctx.tellApp();
+    if (tellAppCtx) {
+      var tellArgCtx = tellAppCtx.tellArg();
+      var statementListCtx = tellArgCtx.statementList();
+      // Is it for process Google Chrome?
+      if (tellAppCtx.appType().getText() === 'process' && tellAppCtx.STRING().getText() === 'Google Chrome') {
+        // Is it just one statement (toStatement)?
+        // check to see if there's a request.
+        if (_this.checkToStatement(tellArgCtx, function (statementCtx) {
+          var keystrokeCtx = statementCtx.keystroke();
+          _this.checkStart(keystrokeCtx, true);
+          return keystrokeCtx;
+        })) {
+          _this.first = false;
+          _this.requests++;
         }
-        if (tellAppCtx.appType().getText() === 'application') {
-          // Specifically looking for setting the URL.
-          this.checkToStatement(tellArgCtx, function (statementCtx) {
-            // Check if URL
-            // Should we checkMakeNew as well?
-            if (_this.checkUrl(statementCtx, start, first) && _this.checkStart(statementCtx, true, [requests, 0], start, first)) {
-              {
-                requests++;
-              }
+        // And if not?
+        else if (statementListCtx) {
+          // update check requests to set state.
+          _this.checkRequests(statementListCtx, function (statementCtx) {
+            var keystrokeCtx = statementCtx.keystroke();
+            if (keystrokeCtx) {
+              _this.checkStart(keystrokeCtx, !!keystrokeCtx);
+              _this.first = false;
+              _this.requests++;
             }
           });
-          // We're looking for open locations and set URL's
-          // So far the callback's not doing much. No return value, no incrementing requests, no detection of dups...
-          var _statementListCtx = tellArgCtx.statementList();
-          if (_statementListCtx) {
-            var _count = this.checkRequests(_statementListCtx, function (statementCtx) {
-              var URLRequests = _this.checkUrl(statementCtx, start, first);
-              if (_this.checkStart(statementCtx, !!URLRequests, [requests, 0], start, first)) {
-                start = false;
-                return statementCtx;
-              }
-            }, start, first);
-            if (_count) {
-              requests += _count;
-            }
-          }
-          // to my knowledge there isn't such a thing as a tellApp inside a tellId.
         }
       }
-
-      return requests;
+      if (tellAppCtx.appType().getText() === 'application') {
+        // Specifically looking for setting the URL.
+        _this.checkToStatement(tellArgCtx, function (statementCtx) {
+          // Check if URL
+          if (_this.checkUrl(statementCtx)) {
+            {
+              _this.checkStart(statementCtx, true);
+              _this.requests++;
+            }
+          }
+        });
+        // We're looking for open locations and set URL's
+        var _statementListCtx = tellArgCtx.statementList();
+        if (_statementListCtx) {
+          _this.checkRequests(_statementListCtx, function (statementCtx) {
+            if (_this.checkUrl(statementCtx)) {
+              _this.requests++;
+              _this.checkStart(statementCtx, true);
+              _this.first = false;
+            }
+          });
+        }
+        // to my knowledge there isn't such a thing as a tellApp inside a tellId.
+      }
     }
-  }, {
+    return _this;
+  }
+  _createClass(checkRequestInTell, [{
     key: "checkToStatement",
     value: function checkToStatement(ctx, callback) {
       var toStatementCtx = ctx.toStatement();
@@ -123,44 +110,40 @@ var checkRequestInTell = /*#__PURE__*/function (_checkRequestInIfStat) {
     value: function checkRequests(ctx, requestObjectCallback, start, first) {
       var _this2 = this;
       // Handle cases where this.reqests would normally be incremented.
-      var requests = 0;
       var _iterator = _createForOfIteratorHelper(ctx.statement()),
         _step;
       try {
-        var _loop = function _loop() {
+        for (_iterator.s(); !(_step = _iterator.n()).done;) {
           var statementCtx = _step.value;
-          var requestCtx = requestObjectCallback(statementCtx);
-          if (requestCtx) {
-            requests++;
-          }
+          requestObjectCallback(statementCtx);
           // Loops
           // Will throw an error if it finds any requests.
-          _this2.checkLoop(statementCtx, requestObjectCallback);
+          this.checkLoop(statementCtx, requestObjectCallback);
           // Function calls
           var functionCallCtx = statementCtx.functionCall();
           if (functionCallCtx) {
-            (0, checkRequestListener_1.checkFunctionCall)(functionCallCtx, function (func) {
-              if (_this2.checkStart(functionCallCtx, !!(func.keystrokes || func.requests), [func.requests, func.keystrokes], start, first)) {
-                requests += func.requests + func.keystrokes;
-              }
-            }, _this2.functions, _this2.knownFunctions);
+            this.checkFunctionCall(functionCallCtx, function (func) {
+              _this2.requests += func.requests + func.keystrokes;
+            });
           }
           // if blocks
           var ifBlockCtx = statementCtx.ifBlock();
           if (ifBlockCtx) {
-            _this2.checkIfBlock(ifBlockCtx, _this2.checkTell.bind(_this2), start, false, first);
+            var ifBlockRequests = new checkRequestInIfStatement_1["default"](Object.assign({}, this), ifBlockCtx, false);
+            this.updateProps(ifBlockRequests);
           }
-        };
-        for (_iterator.s(); !(_step = _iterator.n()).done;) {
-          _loop();
+          var errorHandlerCtx = statementCtx.errorHandler();
+          if (errorHandlerCtx) {
+            this.checkErrorHandler(errorHandlerCtx);
+          }
         }
       } catch (err) {
         _iterator.e(err);
       } finally {
         _iterator.f();
       }
-      return requests;
     }
+    // From here on, going to avoid optionals when refactoring and explicitly requiring me to type "false". Leads to less mistakes.
   }, {
     key: "checkUrl",
     value: function checkUrl(ctx, start, first) {
@@ -297,14 +280,23 @@ var checkRequestInTell = /*#__PURE__*/function (_checkRequestInIfStat) {
         var functionCallCtx = statementCtx.functionCall();
         if (functionCallCtx) {
           // If it exists, it has a non-zero amount of requests
-          (0, checkRequestListener_1.checkFunctionCall)(functionCallCtx, function () {
+          _this4.checkFunctionCall(functionCallCtx, function () {
             error();
-          }, _this4.functions, _this4.knownFunctions);
+          });
         }
         // Check for if statement
         var ifBlockCtx = statementCtx.ifBlock();
         if (ifBlockCtx) {
-          if (_this4.checkIfBlock(ifBlockCtx, _this4.checkTell.bind(_this4), false, ifBlockCtx.ifStatement(), false)) {
+          var ifBlockRequests = new checkRequestInIfStatement_1["default"]({
+            functions: _this4.functions,
+            knownFunctions: _this4.knownFunctions,
+            start: false,
+            first: false,
+            requests: 0,
+            keystrokes: 0,
+            dup: false
+          }, ifBlockCtx, false);
+          if (ifBlockRequests.requests || ifBlockRequests.keystrokes) {
             error();
           }
         }
@@ -312,5 +304,5 @@ var checkRequestInTell = /*#__PURE__*/function (_checkRequestInIfStat) {
     }
   }]);
   return checkRequestInTell;
-}(checkRequestInIfStatement_1["default"]);
+}(checkBlock_1["default"]);
 exports.checkRequestInTell = checkRequestInTell;
