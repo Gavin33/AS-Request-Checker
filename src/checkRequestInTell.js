@@ -7,11 +7,15 @@ exports.checkRequestInTell = void 0;
 const checkRequestInIfStatement_1 = __importDefault(require("./checkRequestInIfStatement"));
 const checkRequestListener_1 = require("./checkRequestListener");
 // Thought of the day. What if there's more than one request in a tell block? Would we get expected behavior, or did we just forget about that whole thing?
+// Only accessable through if block checks.
+// So far we only check dups per statement of an if block. If it's a tell block or error handler, it would just see that the block starts before the request and say "ok". We need to check start of statements inside these blocks.
+// Also no error handling for miles.
 class checkRequestInTell extends checkRequestInIfStatement_1.default {
     constructor() {
         super();
     }
-    checkTell(ctx) {
+    // From here on, going to avoid optionals when refactoring and explicitly requiring me to type "false". Leads to less mistakes.
+    checkTell(ctx, start, first) {
         let requests = 0;
         // Is this for an app?
         const tellAppCtx = ctx.tellApp();
@@ -21,33 +25,58 @@ class checkRequestInTell extends checkRequestInIfStatement_1.default {
             if (tellAppCtx.appType().getText() === 'process' &&
                 tellAppCtx.STRING().getText() === 'Google Chrome') {
                 // Is it just one statement (toStatement)?
+                // check to see if there's a request.
                 if (this.checkToStatement(tellArgCtx, (statementCtx) => {
-                    return statementCtx.keystroke();
+                    // What does it matter if it's first or not?
+                    const keystrokeCtx = statementCtx.keystroke();
+                    if (this.checkStart(keystrokeCtx, true, [requests, 0], start, first)) {
+                        return keystrokeCtx;
+                    }
                 })) {
                     requests++;
                 }
                 // And if not?
                 const statementListCtx = tellArgCtx.statementList();
                 if (statementListCtx) {
-                    requests += this.checkRequests(statementListCtx, (statementCtx) => {
-                        return statementCtx.keystroke();
-                    });
+                    // Might be worth it to bake checkStart into checkRequests.
+                    // kinda? checkURL returns terminal nodes. Those don't have start values.
+                    // I'd suggest just checkStart on statementCtx as opposed to the return of checkURL.
+                    const count = this.checkRequests(statementListCtx, (statementCtx) => {
+                        const keystrokeCtx = statementCtx.keystroke();
+                        if (this.checkStart(keystrokeCtx, !!keystrokeCtx, [requests, 0], start, first)) {
+                            first = false;
+                            return keystrokeCtx;
+                        }
+                    }, start, first);
+                    requests += count;
                 }
             }
             if (tellAppCtx.appType().getText() === 'application') {
                 // Specifically looking for setting the URL.
                 this.checkToStatement(tellArgCtx, (statementCtx) => {
                     // Check if URL
-                    if (this.checkUrl(statementCtx)) {
-                        requests++;
+                    // Should we checkMakeNew as well?
+                    if (this.checkUrl(statementCtx, start, first) &&
+                        this.checkStart(statementCtx, true, [requests, 0], start, first)) {
+                        {
+                            requests++;
+                        }
                     }
                 });
                 // We're looking for open locations and set URL's
+                // So far the callback's not doing much. No return value, no incrementing requests, no detection of dups...
                 const statementListCtx = tellArgCtx.statementList();
                 if (statementListCtx) {
-                    requests += this.checkRequests(statementListCtx, (statementCtx) => {
-                        return this.checkUrl(statementCtx);
-                    });
+                    const count = this.checkRequests(statementListCtx, (statementCtx) => {
+                        const URLRequests = this.checkUrl(statementCtx, start, first);
+                        if (this.checkStart(statementCtx, !!URLRequests, [requests, 0], start, first)) {
+                            start = false;
+                            return statementCtx;
+                        }
+                    }, start, first);
+                    if (count) {
+                        requests += count;
+                    }
                 }
                 // to my knowledge there isn't such a thing as a tellApp inside a tellId.
             }
@@ -61,18 +90,12 @@ class checkRequestInTell extends checkRequestInIfStatement_1.default {
             return callback(statementCtx);
         }
     }
-    checkRequests(ctx, requestObjectCallback) {
+    checkRequests(ctx, requestObjectCallback, start, first) {
         // Handle cases where this.reqests would normally be incremented.
         let requests = 0;
-        ctx.statement().forEach((statementCtx) => {
-            // find all requests in statementList
+        for (let statementCtx of ctx.statement()) {
             const requestCtx = requestObjectCallback(statementCtx);
-            if (Array.isArray(requestCtx)) {
-                for (let s of requestCtx) {
-                    requests++;
-                }
-            }
-            else if (requestCtx) {
+            if (requestCtx) {
                 requests++;
             }
             // Loops
@@ -82,18 +105,20 @@ class checkRequestInTell extends checkRequestInIfStatement_1.default {
             const functionCallCtx = statementCtx.functionCall();
             if (functionCallCtx) {
                 (0, checkRequestListener_1.checkFunctionCall)(functionCallCtx, (func) => {
-                    requests += func.requests + func.keystrokes;
+                    if (this.checkStart(functionCallCtx, !!(func.keystrokes || func.requests), [func.requests, func.keystrokes], start, first)) {
+                        requests += func.requests + func.keystrokes;
+                    }
                 }, this.functions, this.knownFunctions);
             }
             // if blocks
             const ifBlockCtx = statementCtx.ifBlock();
             if (ifBlockCtx) {
-                this.checkIfBlock(ifBlockCtx, this.checkTell.bind(this)).forEach((request) => (requests += request));
+                this.checkIfBlock(ifBlockCtx, this.checkTell.bind(this), start, false, first);
             }
-        });
+        }
         return requests;
     }
-    checkUrl(ctx) {
+    checkUrl(ctx, start, first) {
         const tellCtx = ctx.tell();
         if (tellCtx) {
             const tellIdCtx = tellCtx.tellId();
@@ -109,7 +134,13 @@ class checkRequestInTell extends checkRequestInIfStatement_1.default {
                 }
                 const statementListCtx = tellArgCtx.statementList();
                 if (statementListCtx) {
-                    return statementListCtx.statement();
+                    return this.checkRequests(statementListCtx, (statementCtx) => {
+                        const URLRequests = this.checkUrl(statementCtx, start, first);
+                        if (this.checkStart(statementCtx, !!URLRequests, [0, 0], start, first)) {
+                            start = false;
+                            return statementCtx;
+                        }
+                    }, start, first);
                 }
             }
         }
@@ -209,7 +240,7 @@ class checkRequestInTell extends checkRequestInIfStatement_1.default {
             // Check for if statement
             const ifBlockCtx = statementCtx.ifBlock();
             if (ifBlockCtx) {
-                if (this.checkIfBlock(ifBlockCtx, this.checkTell.bind(this)).every((element) => element)) {
+                if (this.checkIfBlock(ifBlockCtx, this.checkTell.bind(this), false, ifBlockCtx.ifStatement(), false)) {
                     error();
                 }
             }

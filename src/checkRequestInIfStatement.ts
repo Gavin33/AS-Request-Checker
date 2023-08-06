@@ -1,4 +1,3 @@
-import { TerminalNode } from 'antlr4';
 import { ParserRuleContext } from 'antlr4ts';
 import {
   IfBlockContext,
@@ -11,7 +10,11 @@ import {
 } from './ASGrammarParser';
 import { checkFunctionCall, FunctionProperties } from './checkRequestListener';
 
-type TellCallback = (ctx: TellContext, start: number | false, first: boolean) => number | false;
+type TellCallback = (
+  ctx: TellContext,
+  start: number | false,
+  first: boolean
+) => number | false;
 
 // check other functions to see where requests are being logged. Make sure first is updated where appropriate.
 
@@ -30,7 +33,7 @@ export default class checkRequestInIfStatement {
     ctx: ParserRuleContext | undefined,
     areRequests: boolean,
     count: number[],
-    start: number | boolean,
+    start: number | false,
     first: boolean
   ) {
     // If you just want to check if the context is found, just pass true to areRequests. Have to check if ctx is truthy anyway.
@@ -75,9 +78,10 @@ export default class checkRequestInIfStatement {
           functionCallCtx,
           (func) => {
             if (func.requests || func.keystrokes) {
-            first = false
-            requests += func.requests;
-            keystrokes += func.keystrokes;}
+              first = false;
+              requests += func.requests;
+              keystrokes += func.keystrokes;
+            }
           },
           this.functions,
           this.knownFunctions
@@ -104,11 +108,11 @@ export default class checkRequestInIfStatement {
       }
       // handle statements. Specifically errorHandlers, tells
       else if (tellCtx) {
-        const tellRequests = tellCallback(tellCtx, start, first)
+        const tellRequests = tellCallback(tellCtx, start, first);
         // Not as simple as checking if it's falsy. Must be explicit.
         if (tellRequests !== false) {
           requests += tellRequests;
-          first = false
+          first = false;
         } else {
           return false;
         }
@@ -123,7 +127,7 @@ export default class checkRequestInIfStatement {
           if (count.every((element) => !element)) {
             requests += count[0];
             keystrokes += count[1];
-            first = false
+            first = false;
           }
         } else {
           return false;

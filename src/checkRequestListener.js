@@ -40,13 +40,15 @@ class checkRequestListener extends checkRequestInTell_1.checkRequestInTell {
             case 'IfBlockContext': {
                 const ifBlockCtx = parentCtx;
                 const ifStatementCtx = ctx;
-                const count = this.checkIfBlock(ifBlockCtx, this.checkTell.bind(this), genes.start, ifStatementCtx);
-                if (count.every((element) => element === 0)) {
-                    return;
+                const count = this.checkIfBlock(ifBlockCtx, this.checkTell.bind(this), genes.start, ifStatementCtx, true);
+                if (count) {
+                    if (count.every((element) => element === 0)) {
+                        return;
+                    }
+                    genes.requests = count[0];
+                    genes.keystrokes = count[1];
+                    break;
                 }
-                genes.requests = count[0];
-                genes.keystrokes = count[1];
-                break;
             }
             case 'tellApp': {
                 const tellAppCtx = parentCtx;
@@ -75,13 +77,11 @@ class checkRequestListener extends checkRequestInTell_1.checkRequestInTell {
             }
             case 'ErrorHandlerContext': {
                 const errorHandlerCtx = parentCtx;
-                const errorHandlerChildCtx = ctx;
-                const [requests, keystrokes] = this.checkErrorHandler(errorHandlerCtx, this.checkTell.bind(this), errorHandlerChildCtx, genes.start);
-                if (requests === 0 && keystrokes === 0) {
-                    return;
+                const errorRequests = this.checkErrorHandler(errorHandlerCtx, this.checkTell.bind(this), genes.start, true);
+                if (errorRequests) {
+                    genes.requests += errorRequests[0];
+                    genes.keystrokes += errorRequests[1];
                 }
-                genes.requests += requests;
-                genes.keystrokes += keystrokes;
             }
         }
         if (genes.inTell) {

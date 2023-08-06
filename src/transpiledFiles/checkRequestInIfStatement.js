@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
 function _slicedToArray(arr, i) { return _arrayWithHoles(arr) || _iterableToArrayLimit(arr, i) || _unsupportedIterableToArray(arr, i) || _nonIterableRest(); }
@@ -20,12 +20,12 @@ function _possibleConstructorReturn(self, call) { if (call && (_typeof(call) ===
 function _assertThisInitialized(self) { if (self === void 0) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return self; }
 function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Reflect.construct) return false; if (Reflect.construct.sham) return false; if (typeof Proxy === "function") return true; try { Boolean.prototype.valueOf.call(Reflect.construct(Boolean, [], function () {})); return true; } catch (e) { return false; } }
 function _getPrototypeOf(o) { _getPrototypeOf = Object.setPrototypeOf ? Object.getPrototypeOf.bind() : function _getPrototypeOf(o) { return o.__proto__ || Object.getPrototypeOf(o); }; return _getPrototypeOf(o); }
-Object.defineProperty(exports, '__esModule', {
+Object.defineProperty(exports, "__esModule", {
   value: true
 });
-var checkRequestListener_1 = require('./checkRequestListener');
-var _require = require('./ASGrammarListener'),
-  ASGrammarListener = _require["default"];
+var checkRequestListener_1 = require("./checkRequestListener");
+var ASGrammarListener = require('./ASGrammarListener')['default'];
+// check other functions to see where requests are being logged. Make sure first is updated where appropriate.
 var checkRequestInIfStatement = /*#__PURE__*/function (_ASGrammarListener) {
   _inherits(checkRequestInIfStatement, _ASGrammarListener);
   var _super = _createSuper(checkRequestInIfStatement);
@@ -40,8 +40,26 @@ var checkRequestInIfStatement = /*#__PURE__*/function (_ASGrammarListener) {
     return _this;
   }
   _createClass(checkRequestInIfStatement, [{
+    key: "checkStart",
+    value: function checkStart(ctx, areRequests, count, start, first) {
+      // If you just want to check if the context is found, just pass true to areRequests. Have to check if ctx is truthy anyway.
+      // Problem. If we don't stop code execusion, there will be at least one extra request logged. More if we're dealing with a function call with multiple requests. Find a way to stop execution.
+      // check to see if there's a request.
+      if (first) {
+        if (areRequests && start && ctx) {
+          // If so, start. If it's original, then continue with the code. If not, stop it.
+          if (start > ctx.start.start) {
+            // Definitely return something that's NOT returning a 0, 0 array. Will also need to prevent the check after first successful execution.
+            console.log('test');
+            return false;
+          }
+        }
+      }
+      return count;
+    }
+  }, {
     key: "checkIfStatement",
-    value: function checkIfStatement(ctx, tellCallback, start) {
+    value: function checkIfStatement(ctx, tellCallback, start, first) {
       var _a, _b, _c;
       var requests = 0;
       var keystrokes = 0;
@@ -52,40 +70,71 @@ var checkRequestInIfStatement = /*#__PURE__*/function (_ASGrammarListener) {
           var statementCtx = _step.value;
           if (((_b = (_a = statementCtx.keystroke()) === null || _a === void 0 ? void 0 : _a.expression()) === null || _b === void 0 ? void 0 : _b.getText()) === 'return') {
             keystrokes++;
+            first = false;
           } else if (((_c = statementCtx.set()) === null || _c === void 0 ? void 0 : _c.operation().value(0).getText()) === 'URL') {
             requests++;
+            first = false;
           } else if (statementCtx.openLocation()) {
             requests++;
+            first = false;
           }
+          // function calls are single statements. Can be processed like any other request in terms of checking dups.
           var functionCallCtx = statementCtx.functionCall();
           if (functionCallCtx) {
             (0, checkRequestListener_1.checkFunctionCall)(functionCallCtx, function (func) {
-              requests += func.requests;
-              keystrokes += func.keystrokes;
+              if (func.requests || func.keystrokes) {
+                first = false;
+                requests += func.requests;
+                keystrokes += func.keystrokes;
+              }
             }, this.functions, this.knownFunctions);
           }
           var ifBlockCtx = statementCtx.ifBlock();
+          var tellCtx = statementCtx.tell();
+          var errorHandlerCtx = statementCtx.errorHandler();
           if (ifBlockCtx) {
-            var count = this.checkIfBlock(ifBlockCtx, tellCallback.bind(this));
-            requests += count[0];
-            keystrokes += count[1];
+            var count = this.checkIfBlock(ifBlockCtx, tellCallback.bind(this), false, false, first);
+            if (count) {
+              // check if 0, 0 and set first to false
+              requests += count[0];
+              keystrokes += count[1];
+            } else {
+              return false;
+            }
           }
           // handle statements. Specifically errorHandlers, tells
-          var tellCtx = statementCtx.tell();
-          if (tellCtx) {
-            requests += tellCallback(tellCtx);
-          }
-          var errorHandlerCtx = statementCtx.errorHandler();
-          if (errorHandlerCtx) {
-            var _count = this.checkErrorHandler(errorHandlerCtx, tellCallback.bind(this));
-            requests += _count[0];
-            keystrokes += _count[1];
-          }
-          if (start && (requests || keystrokes)) {
-            // Prevent two requests from the same if block from being counted twice
-            if (start > statementCtx.start.start) {
-              // if there were requests in the ifStatement it wouldn't reach the else code.
-              return [0, 0];
+          else if (tellCtx) {
+            var tellRequests = tellCallback(tellCtx, start, first);
+            // Not as simple as checking if it's falsy. Must be explicit.
+            if (tellRequests !== false) {
+              requests += tellRequests;
+              first = false;
+            } else {
+              return false;
+            }
+          } else if (errorHandlerCtx) {
+            var _count = this.checkErrorHandler(errorHandlerCtx, tellCallback.bind(this), false, first);
+            if (_count) {
+              if (_count.every(function (element) {
+                return !element;
+              })) {
+                requests += _count[0];
+                keystrokes += _count[1];
+                first = false;
+              }
+            } else {
+              return false;
+            }
+          } else if (first) {
+            var _count2 = this.checkStart(statementCtx, !!(requests || keystrokes), [requests, keystrokes], start, first);
+            // if this isn't a repeat.
+            if (_count2) {
+              var _count3 = _slicedToArray(_count2, 2);
+              requests = _count3[0];
+              keystrokes = _count3[1];
+              first = false;
+            } else {
+              return false;
             }
           }
         }
@@ -98,82 +147,86 @@ var checkRequestInIfStatement = /*#__PURE__*/function (_ASGrammarListener) {
     }
   }, {
     key: "checkElseRequests",
-    value: function checkElseRequests(ctx, tellCallback, props, start) {
+    value: function checkElseRequests(ctx, tellCallback, props, start, first) {
       // If multiple requests in else(if), will check each and every one of them in that particular else(if). And then ignore them. Potential performance loss. But still correct behavior. Also if there are so many requests in a single else(if) statement that the performance loss is noticable, you probably have bigger problems than this code.
-      var elseProps = this.checkIfStatement(ctx, tellCallback.bind(this), start);
-      for (var i in elseProps) {
-        if (elseProps[i] > props[i]) {
-          props[i] = elseProps[i];
+      var elseProps = this.checkIfStatement(ctx, tellCallback.bind(this), start, first);
+      if (elseProps) {
+        for (var i in elseProps) {
+          if (elseProps[i] > props[i]) {
+            props[i] = elseProps[i];
+          }
         }
+        return props;
       }
-      return props;
+    }
+  }, {
+    key: "checkFalse",
+    value: function checkFalse(count) {
+      // set to count
+      if (count) {
+        return count;
+      } else {
+        return false;
+      }
     }
   }, {
     key: "checkElse",
-    value: function checkElse(ctx, tellCallback, props, start) {
-      if (ctx.constructor.name === 'ElseStatementContext') {
-        var elseStatementCtx = ctx;
-        props = this.checkElseRequests(elseStatementCtx.statementList(), tellCallback.bind(this), props, start);
-      } else {
-        var elseIfCtx = ctx;
-        props = this.checkElseRequests(elseIfCtx.ifStatement().statementList(), tellCallback.bind(this), props, start);
+    value: function checkElse(ctx, tellCallback, props, start, first) {
+      var elseRequests;
+      if (props) {
+        if (ctx.constructor.name === 'ElseStatementContext') {
+          var elseStatementCtx = ctx;
+          elseRequests = this.checkElseRequests(elseStatementCtx.statementList(), tellCallback.bind(this), props, start, first);
+        } else {
+          var elseIfCtx = ctx;
+          elseRequests = this.checkElseRequests(elseIfCtx.ifStatement().statementList(), tellCallback.bind(this), props, start, first);
+        }
       }
-      return props;
+      return this.checkFalse(elseRequests);
     }
   }, {
     key: "checkIfBlock",
-    value: function checkIfBlock(ifBlockCtx, tellCallback, start, ctx) {
+    value: function checkIfBlock(ifBlockCtx, tellCallback, start, ctx, first) {
       var _this2 = this;
-      var _a, _b;
       var elseIfArray = ifBlockCtx.elseIf();
       // count keystrokes/requests in ifStatement
       var count = [0, 0];
-      // calced is if I've already calculated keystrokes/requests for this ifBlock.
-      var calced = false;
       if ((ctx === null || ctx === void 0 ? void 0 : ctx.constructor.name) === 'IfStatementContext' || !ctx) {
         // Handle various parts of the ifBlock (if, elseIf, else)
-        count = this.checkIfStatement(ifBlockCtx.ifStatement().statementList(), tellCallback.bind(this), start);
-        // Only way this method can be triggered is if this is a request, keystroke or function call with a request or keystroke from inside an ifStatement. If both are 0, only reason is if this is a dup. No need to analyze further.
-        if (count.every(function (element) {
-          return !element;
-        })) {
-          return [0, 0];
-        }
-        // elseIf
-        if (elseIfArray) {
-          elseIfArray.forEach(function (elseIfCtx) {
-            count = _this2.checkElse(elseIfCtx, tellCallback.bind(_this2), count, start);
-          });
-        }
-        // else
-        var elseStatementCtx = ifBlockCtx.elseStatement();
-        if (elseStatementCtx) {
-          count = this.checkElse(elseStatementCtx, tellCallback.bind(this), count, start);
+        count = this.checkIfStatement(ifBlockCtx.ifStatement().statementList(), tellCallback.bind(this), start, first);
+        if (count) {
+          // elseIf
+          if (elseIfArray) {
+            elseIfArray.forEach(function (elseIfCtx) {
+              count = _this2.checkElse(elseIfCtx, tellCallback.bind(_this2), count, start, false);
+            });
+          }
+          // else
+          var elseStatementCtx = ifBlockCtx.elseStatement();
+          if (elseStatementCtx) {
+            count = this.checkElse(elseStatementCtx, tellCallback.bind(this), count, start, false);
+          }
         }
       }
       // For others, check if the ifBlock has already been processed (if request in ifStatement/preceeding elseIfStatment)
       else {
-        if (this.checkIfStatement(ifBlockCtx.ifStatement().statementList(), tellCallback.bind(this), start).every(function (element) {
-          return !element;
-        })) {
-          var afterCtx = false;
+        var ifRequests = this.checkIfStatement(ifBlockCtx.ifStatement().statementList(), tellCallback.bind(this), start, first);
+        if (ifRequests) {
           if (elseIfArray) {
             var _iterator2 = _createForOfIteratorHelper(elseIfArray),
               _step2;
             try {
               for (_iterator2.s(); !(_step2 = _iterator2.n()).done;) {
                 var elseIfCtx = _step2.value;
-                if (elseIfCtx.start.start === ctx.start.start && ((_a = elseIfCtx.stop) === null || _a === void 0 ? void 0 : _a.stop) === ((_b = ctx.stop) === null || _b === void 0 ? void 0 : _b.stop)) {
-                  afterCtx = true;
-                } else {
-                  count = this.checkElse(elseIfCtx, tellCallback.bind(this), count);
-                  // If there are any requests/keystrokes, and not after context, it's calced. Can stop checking.
-                  if (!count.every(function (element) {
-                    return !element;
-                  }) && !afterCtx) {
-                    calced = true;
-                    break;
-                  }
+                count = this.checkElse(elseIfCtx, tellCallback.bind(this), count, false, first);
+                // If there are any requests/keystrokes, and not after context, it's calced. Can stop checking.
+                if (!count) {
+                  return count;
+                }
+                if (!count.every(function (element) {
+                  !element;
+                })) {
+                  first = false;
                 }
               }
             } catch (err) {
@@ -182,44 +235,38 @@ var checkRequestInIfStatement = /*#__PURE__*/function (_ASGrammarListener) {
               _iterator2.f();
             }
           }
-          if (!calced) {
-            var _elseStatementCtx = ctx;
-            count = this.checkElse(_elseStatementCtx, tellCallback.bind(this), count);
-          }
-        } else {
-          calced = true;
+          var _elseStatementCtx = ctx;
+          count = this.checkElse(_elseStatementCtx, tellCallback.bind(this), count, false, first);
         }
       }
-      if (!calced) {
-        return count;
-      }
-      return [0, 0];
+      return count;
     }
   }, {
     key: "checkErrorHandler",
-    value: function checkErrorHandler(parentCtx, tellCallback, ctx, start) {
-      var _a, _b;
-      // Can be handled like a conditional without the option for elseIf
+    value: function checkErrorHandler(parentCtx, tellCallback, start, first) {
+      // Possible that part of the try block could execute then throw an error. Treating them as non-mutually exclusive.
       // Also have to account for more than one request.
       var tryStatementListCtx = parentCtx.statementList(0);
-      if (tryStatementListCtx.start.start === (ctx === null || ctx === void 0 ? void 0 : ctx.start.start) && ((_a = tryStatementListCtx.stop) === null || _a === void 0 ? void 0 : _a.stop) === ((_b = ctx === null || ctx === void 0 ? void 0 : ctx.stop) === null || _b === void 0 ? void 0 : _b.stop) || !ctx) {
-        var _this$checkIfStatemen = this.checkIfStatement(tryStatementListCtx, tellCallback.bind(this), start),
-          _this$checkIfStatemen2 = _slicedToArray(_this$checkIfStatemen, 2),
-          requests = _this$checkIfStatemen2[0],
-          keystrokes = _this$checkIfStatemen2[1];
+      var tryCount = [0, 0];
+      tryCount = this.checkIfStatement(tryStatementListCtx, tellCallback.bind(this), start, first);
+      if (tryCount) {
+        if (!tryCount.every(function (element) {
+          return !element;
+        })) {
+          first = false;
+        }
         var errorStatementListCtx = parentCtx.statementList(1);
         if (errorStatementListCtx) {
-          var count = this.checkIfStatement(tryStatementListCtx, tellCallback.bind(this), start);
-          if (count[0] > requests) {
-            requests = count[0];
-          }
-          if (count[1] > keystrokes) {
-            keystrokes = count[1];
+          var count = this.checkIfStatement(tryStatementListCtx, tellCallback.bind(this), start, first);
+          if (count) {
+            tryCount[0] += count[0];
+            tryCount[1] += count[1];
+          } else {
+            return count;
           }
         }
-        return [requests, keystrokes];
       }
-      return [0, 0];
+      return tryCount;
     }
   }]);
   return checkRequestInIfStatement;

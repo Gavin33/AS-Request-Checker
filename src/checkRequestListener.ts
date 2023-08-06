@@ -5,7 +5,6 @@ import {
   FunctionCallContext,
   IfBlockContext,
   OpenLocationContext,
-  StatementListContext,
   ElseIfContext,
   ElseStatementContext,
   IfStatementContext,
@@ -36,9 +35,9 @@ interface Genes {
 
 type FunctionCallback = (functionProperties: FunctionProperties) => void;
 
-type ContextCallback = (
+export type ContextCallback = (
   ctx: StatementContext
-) => ParserRuleContext | TerminalNode | undefined;
+) => ParserRuleContext | false | undefined;
 type ArrayCallback = (
   ctx: StatementContext
 ) => ParserRuleContext[] | TerminalNode[] | undefined;
@@ -71,15 +70,115 @@ export const checkFunctionCall = (
   }
 };
 
+class checkParentCtx extends checkRequestInTell {
+  genes: Genes;
+  requests: number;
+  functions: { [key: string]: FunctionProperties };
+  knownFunctions: string[];
+  constructor(
+    ctx: ParserRuleContext,
+    genes: Genes,
+    requests: number = 0,
+    functions: { [key: string]: FunctionProperties },
+    knownFunctions: string[]
+  ) {
+    super();
+    this.genes = genes;
+    this.requests = requests;
+    this.functions = functions;
+    this.knownFunctions = knownFunctions;
+    this.checkParentCtx(ctx)
+  }
+  checkParentCtx(ctx: ParserRuleContext) {
+    // Other than recursive calls, there's only 4 inputs that are going to be fed into this: set URL, keystroke return, open location and functionCall.
+    const parentCtx = ctx.parentCtx;
+    switch (parentCtx.constructor.name) {
+      case 'ProgramContext': {
+        this.requests += this.genes.requests;
+        return;
+      }
+      case 'LoopStatementContext': {
+        // why would we be checking a functionCall unless it had a request in it? just throw the error
+        throw new Error('Request detected inside loop');
+      }
+      case 'IfBlockContext': {
+        const ifBlockCtx = parentCtx as IfBlockContext;
+        const ifStatementCtx = ctx as
+          | IfStatementContext
+          | ElseIfContext
+          | ElseStatementContext;
+        const count = this.checkIfBlock(
+          ifBlockCtx,
+          this.checkTell.bind(this),
+          this.genes.start,
+          ifStatementCtx,
+          true
+        );
+        if (count) {
+          if (count.every((element) => element === 0)) {
+            return;
+          }
+          this.genes.requests = count[0];
+          this.genes.keystrokes = count[1];
+          break;
+        }
+      }
+      case 'tellApp': {
+        const tellAppCtx = parentCtx as TellAppContext;
+        if (
+          tellAppCtx.appType().getText() === 'process' &&
+          tellAppCtx.STRING().getText() === 'Google Chrome'
+        ) {
+          this.genes.inTell = true;
+        }
+        break;
+      }
+      case 'FunctionDeclarationContext': {
+        // add the current requests and keystrokes to the count for the declaration. If there are more requests they'll also be calced and added to the count for the declaration.
+        const functionDeclarationCtx = parentCtx as FunctionDeclarationContext;
+        const funcName = functionDeclarationCtx.IDENTIFIER(0).getText();
+        if (!(funcName in this.functions)) {
+          this.functions[funcName] = { requests: 0, keystrokes: 0 };
+        }
+        this.functions[funcName].requests += this.genes.requests;
+        if (this.genes.inTell) {
+          this.functions[funcName].requests += this.genes.keystrokes;
+        } else {
+          this.functions[funcName].keystrokes += this.genes.keystrokes;
+        }
+        // According to AS syntax, function declarations are always at the top level. So only thing above this is statement => program. Safe to return here.
+        return;
+      }
+      case 'ErrorHandlerContext': {
+        const errorHandlerCtx = parentCtx as ErrorHandlerContext;
+        const errorRequests = this.checkErrorHandler(
+          errorHandlerCtx,
+          this.checkTell.bind(this),
+          this.genes.start,
+          true
+        );
+        if (errorRequests) {
+          this.genes.requests += errorRequests[0];
+          this.genes.keystrokes += errorRequests[1];
+        }
+      }
+    }
+    if (this.genes.inTell) {
+      this.genes.requests += this.genes.keystrokes;
+    }
+    this.checkParentCtx(parentCtx);
+  }
+}
+
 class checkRequestListener
-  extends checkRequestInTell
+  // extends checkRequestInTell
   implements ASGrammarListener
 {
   // extends ASGrammarListener
   requests: number;
 
   constructor(requests: number = 0) {
-    super();
+    // super();
     this.requests = requests;
   }
   // check function call method
@@ -111,14 +210,17 @@ class checkRequestListener
           ifBlockCtx,
           this.checkTell.bind(this),
           genes.start,
-          ifStatementCtx
+          ifStatementCtx,
+          true
         );
-        if (count.every((element) => element === 0)) {
-          return;
+        if (count) {
+          if (count.every((element) => element === 0)) {
+            return;
+          }
+          genes.requests = count[0];
+          genes.keystrokes = count[1];
+          break;
         }
-        genes.requests = count[0];
-        genes.keystrokes = count[1];
-        break;
       }
       case 'tellApp': {
         const tellAppCtx = parentCtx as TellAppContext;
@@ -148,18 +250,16 @@ class checkRequestListener
       }
       case 'ErrorHandlerContext': {
         const errorHandlerCtx = parentCtx as ErrorHandlerContext;
-        const errorHandlerChildCtx = ctx as StatementListContext;
-        const [requests, keystrokes] = this.checkErrorHandler(
+        const errorRequests = this.checkErrorHandler(
           errorHandlerCtx,
           this.checkTell.bind(this),
-          errorHandlerChildCtx,
-          genes.start
+          genes.start,
+          true
         );
-        if (requests === 0 && keystrokes === 0) {
-          return;
+        if (errorRequests) {
+          genes.requests += errorRequests[0];
+          genes.keystrokes += errorRequests[1];
         }
-        genes.requests += requests;
-        genes.keystrokes += keystrokes;
       }
     }
     if (genes.inTell) {
