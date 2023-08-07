@@ -180,10 +180,10 @@ makeNew:
 	)? (withProperties record)?;
 // In AppleScript you can name properties after certain keywords. Variable rule is going to have to account for that feature.
 variable:
-	modifier* IDENTIFIER? property ('as' (IDENTIFIER | 'text' | 'number'))?;
+	modifier* IDENTIFIER? property IDENTIFIER? ('as' (IDENTIFIER | 'text' | 'number'))?;
 // Pretty sure modifier refers to types of keystrokes, but it's still the best name I could come up with. Also implementing get here because I'm not really using it in the parser, basically a shortcut.
-modifier: 'get' | 'last' | 'menu' | 'bar' | 'button' | 'item' | ('end' 'of') | 'the' | 'body';
-property: 'text' | IDENTIFIER | INTEGER | STRING | 'value' | 'count';
+modifier: 'get' | 'last' | 'menu' | 'bar' | 'button' | 'item' | ('end' 'of') | 'the' | 'body' ;
+property: 'text' | IDENTIFIER | INTEGER | STRING | 'value' | 'count' | 'number' | 'id';
 record: '{' (variable ':' expression ','?)+ '}';
 list: '{' arguments? '}';
 

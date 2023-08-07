@@ -2,93 +2,95 @@ import {
   StatementContext,
   StatementListContext,
   TellArgContext,
-  TellContext,
   ValueContext,
 } from './ASGrammarParser';
-import CheckBlock, { checkBlockOptions } from './checkBlock';
-import checkRequestInIfStatement from './checkRequestInIfStatement';
+import checkRequestInIfStatement, {CheckBlock, checkBlockOptions} from './ifStatement';
 import { Callback } from './checkRequestListener';
-
-// Thought of the day. What if there's more than one request in a tell block? Would we get expected behavior, or did we just forget about that whole thing?
 
 // Only accessable through if block checks.
 
-// So far we only check dups per statement of an if block. If it's a tell block or error handler, it would just see that the block starts before the request and say "ok". We need to check start of statements inside these blocks.
-
-// Also no error handling for miles.
-
 export class checkRequestInTell extends CheckBlock {
-  ctx: TellContext;
-  constructor(options: checkBlockOptions, ctx: TellContext) {
+  constructor(options: checkBlockOptions, ctx: StatementContext) {
     super(options);
-    this.ctx = ctx;
-    // Is this for an app?
-    const tellAppCtx = ctx.tellApp();
-    if (tellAppCtx) {
-      const tellArgCtx = tellAppCtx.tellArg();
-      const statementListCtx = tellArgCtx.statementList();
-      // Is it for process Google Chrome?
-      if (
-        tellAppCtx.appType().getText() === 'process' &&
-        tellAppCtx.STRING().getText() === 'Google Chrome'
-      ) {
-        // Is it just one statement (toStatement)?
-        // check to see if there's a request.
+    this.checkTell(ctx);
+  }
+
+  checkTell(ctx: StatementContext) {
+    // Is this a tell?
+    const tellCtx = ctx.tell();
+    if (tellCtx) {
+      // Is this for an app?
+      const tellAppCtx = tellCtx.tellApp();
+      if (tellAppCtx) {
+        const tellArgCtx = tellAppCtx.tellArg();
+        const statementListCtx = tellArgCtx.statementList();
+        // Is it for process Google Chrome?
         if (
+          tellAppCtx.appType().getText() === 'process' &&
+          (tellAppCtx.STRING().getText() === '"Google Chrome"' ||
+            tellAppCtx.STRING().getText() === "'Google Chrome'")
+        ) {
+          // Is it just one statement (toStatement)?
+          // check to see if there's a request.
+          if (
+            this.checkToStatement(
+              tellArgCtx,
+              (statementCtx: StatementContext) => {
+                const keystrokeCtx = statementCtx.keystroke();
+                this.checkStart(keystrokeCtx, true);
+                return keystrokeCtx;
+              }
+            )
+          ) {
+            this.first = false;
+            this.requests++;
+          }
+          // And if not?
+          if (statementListCtx) {
+            // update check requests to set state.
+            this.checkRequests(
+              statementListCtx,
+              (statementCtx: StatementContext) => {
+                const keystrokeCtx = statementCtx.keystroke();
+                if (keystrokeCtx) {
+                  this.checkStart(keystrokeCtx, !!keystrokeCtx);
+                  this.first = false;
+                  this.requests++;
+                }
+              }
+            );
+          }
+        }
+        if (tellAppCtx.appType().getText() === 'application') {
+          // Specifically looking for setting the URL.
           this.checkToStatement(
             tellArgCtx,
             (statementCtx: StatementContext) => {
-              const keystrokeCtx = statementCtx.keystroke();
-              this.checkStart(keystrokeCtx, true);
-              return keystrokeCtx;
-            }
-          )
-        ) {
-          this.first = false;
-          this.requests++;
-        }
-        // And if not?
-        else if (statementListCtx) {
-          // update check requests to set state.
-          this.checkRequests(
-            statementListCtx,
-            (statementCtx: StatementContext) => {
-              const keystrokeCtx = statementCtx.keystroke();
-              if (keystrokeCtx) {
-                this.checkStart(keystrokeCtx, !!keystrokeCtx);
-                this.first = false;
-                this.requests++;
-              }
-            }
-          );
-        }
-      }
-      if (tellAppCtx.appType().getText() === 'application') {
-        // Specifically looking for setting the URL.
-        this.checkToStatement(tellArgCtx, (statementCtx: StatementContext) => {
-          // Check if URL
-          if (this.checkUrl(statementCtx)) {
-            {
-              this.checkStart(statementCtx, true);
-              this.requests++;
-            }
-          }
-        });
-        // We're looking for open locations and set URL's
-        const statementListCtx = tellArgCtx.statementList();
-        if (statementListCtx) {
-          this.checkRequests(
-            statementListCtx,
-            (statementCtx: StatementContext) => {
+              // Check if URL
               if (this.checkUrl(statementCtx)) {
-                this.requests++;
-                this.checkStart(statementCtx, true);
-                this.first = false;
+                {
+                  this.checkStart(statementCtx, true);
+                  this.requests++;
+                }
               }
             }
           );
+          // We're looking for open locations and set URL's
+          const statementListCtx = tellArgCtx.statementList();
+          if (statementListCtx) {
+            this.checkRequests(
+              statementListCtx,
+              (statementCtx: StatementContext) => {
+                if (this.checkUrl(statementCtx)) {
+                  this.requests++;
+                  this.checkStart(statementCtx, true);
+                  this.first = false;
+                }
+              }
+            );
+          }
+          // to my knowledge there isn't such a thing as a tellApp inside a tellId.
         }
-        // to my knowledge there isn't such a thing as a tellApp inside a tellId.
       }
     }
   }
@@ -105,7 +107,8 @@ export class checkRequestInTell extends CheckBlock {
     // Handle cases where this.reqests would normally be incremented.
     for (let statementCtx of ctx.statement()) {
       requestObjectCallback(statementCtx);
-
+      // tells
+      this.checkTell(statementCtx);
       // Loops
       // Will throw an error if it finds any requests.
       this.checkLoop(statementCtx, requestObjectCallback);
@@ -128,9 +131,9 @@ export class checkRequestInTell extends CheckBlock {
         );
         this.updateProps(ifBlockRequests);
       }
-      const errorHandlerCtx = statementCtx.errorHandler()
+      const errorHandlerCtx = statementCtx.errorHandler();
       if (errorHandlerCtx) {
-        this.checkErrorHandler(errorHandlerCtx)
+        this.checkErrorHandler(errorHandlerCtx);
       }
     }
   }
@@ -267,6 +270,7 @@ export class checkRequestInTell extends CheckBlock {
             requests: 0,
             keystrokes: 0,
             dup: false,
+            callback: this.callback,
           },
           ifBlockCtx,
           false

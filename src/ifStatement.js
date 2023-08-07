@@ -1,15 +1,11 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
-const checkRequestInIfStatement_1 = __importDefault(require("./checkRequestInIfStatement"));
-const checkRequestInTell_1 = require("./checkRequestInTell");
+exports.CheckBlock = void 0;
 // checkBlock
 class CheckBlock {
     constructor(options) {
         // Destructure the options object to access individual properties
-        const { requests, keystrokes, start, first, functions, knownFunctions, dup, } = options;
+        const { requests, keystrokes, start, first, functions, knownFunctions, dup, callback, } = options;
         this.requests = requests;
         this.keystrokes = keystrokes;
         this.start = start;
@@ -17,6 +13,19 @@ class CheckBlock {
         this.functions = functions;
         this.knownFunctions = knownFunctions;
         this.dup = dup;
+        this.callback = callback;
+    }
+    createNewBlockProps() {
+        return {
+            functions: this.functions,
+            knownFunctions: this.knownFunctions,
+            start: this.start,
+            first: this.first,
+            requests: this.requests,
+            keystrokes: this.keystrokes,
+            dup: this.dup,
+            callback: this.callback,
+        };
     }
     checkFunctionCall(ctx, callback) {
         const funcName = ctx.IDENTIFIER().getText();
@@ -41,7 +50,6 @@ class CheckBlock {
                 }
             }
         }
-        this.dup = false;
         // return count;
     }
     updateProps(checkBlock) {
@@ -49,6 +57,12 @@ class CheckBlock {
         this.keystrokes = checkBlock.keystrokes;
         this.dup = checkBlock.dup;
         this.first = checkBlock.dup;
+    }
+    checkStatementBlock(ctx) {
+        const checkBlock = this.callback(this.createNewBlockProps(), ctx);
+        if (checkBlock) {
+            this.updateProps(checkBlock);
+        }
     }
     checkStatement(ctx) {
         var _a, _b, _c;
@@ -76,25 +90,13 @@ class CheckBlock {
                     }
                 });
             }
-            const ifBlockCtx = statementCtx.ifBlock();
-            const tellCtx = statementCtx.tell();
-            const errorHandlerCtx = statementCtx.errorHandler();
-            if (ifBlockCtx) {
-                const ifBlockRequests = new checkRequestInIfStatement_1.default(Object.assign({}, this), ifBlockCtx, false);
-                this.updateProps(ifBlockRequests);
-            }
-            // handle statements. Specifically errorHandlers, tells
-            // tell class.
-            else if (tellCtx) {
-                const tellRequests = new checkRequestInTell_1.checkRequestInTell(Object.assign({}, this), tellCtx);
-                this.updateProps(tellRequests);
-            }
-            // error handler
-            else if (errorHandlerCtx) {
-                const count = this.checkErrorHandler(errorHandlerCtx);
+            if (statementCtx.ifBlock() ||
+                statementCtx.tell() ||
+                statementCtx.errorHandler()) {
+                this.checkStatementBlock(statementCtx);
             }
             // check start
-            if (this.first) {
+            else if (this.first) {
                 const count = this.checkStart(statementCtx, !!(this.requests || this.keystrokes));
             }
         }
@@ -110,4 +112,69 @@ class CheckBlock {
         }
     }
 }
-exports.default = CheckBlock;
+exports.CheckBlock = CheckBlock;
+class checkElse extends CheckBlock {
+    constructor(options, ctx) {
+        super(options);
+        if (ctx.constructor.name === 'ElseStatementContext') {
+            const elseStatementCtx = ctx;
+            this.checkStatement(elseStatementCtx.statementList());
+        }
+        else {
+            const elseIfCtx = ctx;
+            this.checkStatement(elseIfCtx.ifStatement().statementList());
+        }
+    }
+}
+class checkRequestInIfStatement extends CheckBlock {
+    constructor(options, ifBlockCtx, ctx) {
+        super(options);
+        const elseIfArray = ifBlockCtx.elseIf();
+        // count keystrokes/requests in ifStatement
+        if ((ctx === null || ctx === void 0 ? void 0 : ctx.constructor.name) === 'IfStatementContext' || !ctx) {
+            // Handle various parts of the ifBlock (if, elseIf, else)
+            this.checkStatement(ifBlockCtx.ifStatement().statementList());
+            // elseIf
+            if (elseIfArray) {
+                elseIfArray.forEach((elseIfCtx) => {
+                    this.evalElse(elseIfCtx);
+                });
+            }
+            // else
+            const elseStatementCtx = ifBlockCtx.elseStatement();
+            if (elseStatementCtx) {
+                this.evalElse(elseStatementCtx);
+            }
+        }
+        // For others, check if the ifBlock has already been processed (if request in ifStatement/preceeding elseIfStatment)
+        else {
+            this.checkStatement(ifBlockCtx.ifStatement().statementList());
+            if (elseIfArray) {
+                for (let elseIfCtx of elseIfArray) {
+                    this.evalElse(elseIfCtx);
+                }
+            }
+            const elseStatementCtx = ctx;
+            this.evalElse(elseStatementCtx);
+        }
+    }
+    evalElse(ctx) {
+        const elseRequests = new checkElse({
+            functions: this.functions,
+            knownFunctions: this.knownFunctions,
+            start: this.start,
+            first: this.first,
+            requests: 0,
+            keystrokes: 0,
+            dup: this.dup,
+            callback: this.callback,
+        }, ctx);
+        if (elseRequests.requests > this.requests) {
+            this.requests = elseRequests.requests;
+        }
+        if (elseRequests.keystrokes > this.keystrokes) {
+            this.keystrokes = elseRequests.keystrokes;
+        }
+    }
+}
+exports.default = checkRequestInIfStatement;

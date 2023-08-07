@@ -1,9 +1,14 @@
 import { ParserRuleContext } from 'antlr4ts';
-import { ErrorHandlerContext, FunctionCallContext, StatementListContext } from './ASGrammarParser';
-import checkRequestInIfStatement from './checkRequestInIfStatement';
-import { checkRequestInTell } from './checkRequestInTell';
-
-// types
+import {
+  IfBlockContext,
+  ElseIfContext,
+  ElseStatementContext,
+  IfStatementContext,
+  ErrorHandlerContext,
+  FunctionCallContext,
+  StatementContext,
+  StatementListContext,
+} from './ASGrammarParser';
 export interface FunctionProperties {
   requests: number;
   keystrokes: number;
@@ -19,11 +24,16 @@ export interface checkBlockOptions {
   requests: number;
   keystrokes: number;
   dup: boolean;
+  callback: propsCallback;
 }
 
+type propsCallback = (
+  props: checkBlockOptions,
+  ctx: StatementContext
+) => CheckBlock | undefined;
+
 // checkBlock
-export default class CheckBlock {
-  // Define class properties
+export class CheckBlock {
   requests: number;
   keystrokes: number;
   start: number | false;
@@ -31,6 +41,7 @@ export default class CheckBlock {
   functions: { [key: string]: FunctionProperties };
   knownFunctions: string[];
   dup: boolean;
+  callback: propsCallback;
 
   constructor(options: checkBlockOptions) {
     // Destructure the options object to access individual properties
@@ -42,6 +53,7 @@ export default class CheckBlock {
       functions,
       knownFunctions,
       dup,
+      callback,
     } = options;
 
     this.requests = requests;
@@ -51,8 +63,20 @@ export default class CheckBlock {
     this.functions = functions;
     this.knownFunctions = knownFunctions;
     this.dup = dup;
+    this.callback = callback;
   }
-
+  createNewBlockProps(): checkBlockOptions {
+    return {
+      functions: this.functions,
+      knownFunctions: this.knownFunctions,
+      start: this.start,
+      first: this.first,
+      requests: this.requests,
+      keystrokes: this.keystrokes,
+      dup: this.dup,
+      callback: this.callback,
+    };
+  }
   checkFunctionCall(ctx: FunctionCallContext, callback: FunctionCallback) {
     const funcName = ctx.IDENTIFIER().getText();
     if (!this.knownFunctions.includes(funcName)) {
@@ -78,14 +102,19 @@ export default class CheckBlock {
         }
       }
     }
-    this.dup = false
     // return count;
   }
-  updateProps(checkBlock: CheckBlock) {
+  updateProps(checkBlock: checkBlockOptions) {
     this.requests = checkBlock.requests;
     this.keystrokes = checkBlock.keystrokes;
-    this.dup = checkBlock.dup
-    this.first = checkBlock.dup
+    this.dup = checkBlock.dup;
+    this.first = checkBlock.dup;
+  }
+  checkStatementBlock(ctx: StatementContext) {
+    const checkBlock = this.callback(this.createNewBlockProps(), ctx);
+    if (checkBlock) {
+      this.updateProps(checkBlock);
+    }
   }
   checkStatement(ctx: StatementListContext) {
     for (let statementCtx of ctx.statement()) {
@@ -110,26 +139,15 @@ export default class CheckBlock {
           }
         });
       }
-      const ifBlockCtx = statementCtx.ifBlock();
-      const tellCtx = statementCtx.tell();
-      const errorHandlerCtx = statementCtx.errorHandler();
-      if (ifBlockCtx) {
-        const ifBlockRequests = new checkRequestInIfStatement({ ...this }, ifBlockCtx, false);
-        this.updateProps(ifBlockRequests);
-      }
-      // handle statements. Specifically errorHandlers, tells
-
-      // tell class.
-             else if (tellCtx) {
-        const tellRequests = new checkRequestInTell({...this}, tellCtx)
-        this.updateProps(tellRequests)
-      }  
-      // error handler
-      else if (errorHandlerCtx) {
-        const count = this.checkErrorHandler(errorHandlerCtx);
+      if (
+        statementCtx.ifBlock() ||
+        statementCtx.tell() ||
+        statementCtx.errorHandler()
+      ) {
+        this.checkStatementBlock(statementCtx);
       }
       // check start
-      if (this.first) {
+      else if (this.first) {
         const count = this.checkStart(
           statementCtx,
           !!(this.requests || this.keystrokes)
@@ -145,6 +163,82 @@ export default class CheckBlock {
     const errorStatementListCtx = parentCtx.statementList(1);
     if (errorStatementListCtx) {
       this.checkStatement(errorStatementListCtx);
+    }
+  }
+}
+
+
+class checkElse extends CheckBlock {
+  constructor(
+    options: checkBlockOptions,
+    ctx: ElseIfContext | ElseStatementContext
+  ) {
+    super(options);
+    if (ctx.constructor.name === 'ElseStatementContext') {
+      const elseStatementCtx = ctx as ElseStatementContext;
+      this.checkStatement(elseStatementCtx.statementList());
+    } else {
+      const elseIfCtx = ctx as ElseIfContext;
+      this.checkStatement(elseIfCtx.ifStatement().statementList());
+    }
+  }
+}
+
+export default class checkRequestInIfStatement extends CheckBlock {
+  constructor(
+    options: checkBlockOptions,
+    ifBlockCtx: IfBlockContext,
+    ctx: IfStatementContext | ElseIfContext | ElseStatementContext | false
+  ) {
+    super(options);
+    const elseIfArray = ifBlockCtx.elseIf();
+    // count keystrokes/requests in ifStatement
+    if (ctx?.constructor.name === 'IfStatementContext' || !ctx) {
+      // Handle various parts of the ifBlock (if, elseIf, else)
+      this.checkStatement(ifBlockCtx.ifStatement().statementList());
+      // elseIf
+      if (elseIfArray) {
+        elseIfArray.forEach((elseIfCtx) => {
+          this.evalElse(elseIfCtx);
+        });
+      }
+      // else
+      const elseStatementCtx = ifBlockCtx.elseStatement();
+      if (elseStatementCtx) {
+        this.evalElse(elseStatementCtx);
+      }
+    }
+    // For others, check if the ifBlock has already been processed (if request in ifStatement/preceeding elseIfStatment)
+    else {
+      this.checkStatement(ifBlockCtx.ifStatement().statementList());
+      if (elseIfArray) {
+        for (let elseIfCtx of elseIfArray) {
+          this.evalElse(elseIfCtx);
+        }
+      }
+      const elseStatementCtx = ctx as ElseStatementContext;
+      this.evalElse(elseStatementCtx);
+    }
+  }
+  evalElse(ctx: ElseIfContext | ElseStatementContext) {
+    const elseRequests = new checkElse(
+      {
+        functions: this.functions,
+        knownFunctions: this.knownFunctions,
+        start: this.start,
+        first: this.first,
+        requests: 0,
+        keystrokes: 0,
+        dup: this.dup,
+        callback: this.callback,
+      },
+      ctx
+    );
+    if (elseRequests.requests > this.requests) {
+      this.requests = elseRequests.requests;
+    }
+    if (elseRequests.keystrokes > this.keystrokes) {
+      this.keystrokes = elseRequests.keystrokes;
     }
   }
 }
